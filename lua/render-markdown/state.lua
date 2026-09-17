@@ -27,12 +27,14 @@ function M.setup(config)
     M.on = config.on
     M.completions = config.completions
     M.custom_handlers = config.custom_handlers
+    M.preview = config.preview
 
     -- reset cache
     M.cache = {}
 
     require('render-markdown.core.ts').setup()
     require('render-markdown.core.ui').setup()
+    require('render-markdown.preview').setup(config.preview)
 end
 
 ---@param buf integer
@@ -100,6 +102,7 @@ function M.validate()
             completions = settings.completions.schema(),
             overrides = settings.overrides.schema(),
             custom_handlers = settings.handlers.schema(),
+            preview = require('render-markdown.preview.config').schema(),
         })
     )
 end

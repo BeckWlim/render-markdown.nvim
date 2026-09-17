@@ -45,6 +45,7 @@ local M = {}
 ---@field on render.md.on.Config
 ---@field completions render.md.completions.Config
 ---@field custom_handlers table<string, render.md.Handler>
+---@field preview render.md.preview.Config
 
 ---@private
 ---@type boolean
@@ -117,6 +118,8 @@ M.default = {
     win_options = settings.win_options.default,
     overrides = settings.overrides.default,
     custom_handlers = settings.handlers.default,
+    -- Source-mapped, same-window preview. Disable to use ordinary inline rendering.
+    preview = require('render-markdown.preview.config').default,
     yaml = settings.yaml.default,
 }
 

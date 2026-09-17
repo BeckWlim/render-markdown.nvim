@@ -17,6 +17,10 @@ check:
   stylua --check .
 
 test:
+  nvim --headless -u NONE -i NONE -l tests/preview/run.lua
+
+# Inherited inline-rendering tests remain available during renderer development.
+test-inline:
   just busted "tests"
 
 bench:

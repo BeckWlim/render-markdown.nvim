@@ -96,6 +96,7 @@ def update_types(root: Path) -> None:
     files = [
         root / "init.lua",
         root / "settings.lua",
+        root / "preview/config.lua",
     ]
 
     sections = ["---@meta"]
@@ -113,6 +114,10 @@ def update_readme(root: Path) -> None:
     settings = root / "settings.lua"
     old = get_code_block(readme, "log_level", 1)
     new = wrap_setup(root, get_default(root / "init.lua", None))
+    new = new.replace(
+        "require('render-markdown.preview.config').default",
+        indent(get_default(root / "preview/config.lua", None), "    ").strip(),
+    )
     while True:
         match = re.search(r"settings\.(.*?)\.default", new)
         if match is None:

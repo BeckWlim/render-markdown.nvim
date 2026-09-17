@@ -77,8 +77,7 @@ function M.changed_ranges(previous_rows, next_rows)
         return #lines > 0 and table.concat(lines, '\n') .. '\n' or ''
     end
     local ranges = {}
-    local diff = vim.text and vim.text.diff or vim.diff
-    diff(signatures(previous_rows), signatures(next_rows), {
+    vim.text.diff(signatures(previous_rows), signatures(next_rows), {
         algorithm = 'histogram',
         on_hunk = function(old_start, old_count, new_start, new_count)
             ranges[#ranges + 1] = {

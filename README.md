@@ -16,6 +16,13 @@ Improve viewing Markdown in Neovim
 
 # Features
 
+This fork provides a [source-mapped preview](doc/projected-preview.md) with
+wrapped table rows, source editing and saving, and automatic Mermaid rendering
+when the optional Termaid executable is available. The preview is enabled by
+default; use `preview.enabled = false` for ordinary inline rendering. The legacy
+side-by-side preview has been replaced, while setup and command interfaces remain
+compatible on a best-effort basis.
+
 - Contained: runs entirely inside Neovim with no external windows
 - Configurable: all components, padding, icons, and colors can be modified
 - File type agnostic: can render `markdown` injected into any file
@@ -46,7 +53,7 @@ Improve viewing Markdown in Neovim
 
 # Requirements
 
-- Neovim `>= 0.9.0` (minimum) `>= 0.10.0` (recommended)
+- Neovim `>= 0.12.0` for the default preview pipeline
 - Nerd font symbols: [more details](https://github.com/MeanderingProgrammer/render-markdown.nvim/wiki/Fonts)
 - [treesitter](https://github.com/nvim-treesitter/nvim-treesitter) parsers:
   - [markdown & markdown_inline](https://github.com/tree-sitter-grammars/tree-sitter-markdown):
@@ -76,7 +83,7 @@ vim.pack.add({
     'https://github.com/nvim-mini/mini.nvim',            -- if you use the mini.nvim suite
     -- 'https://github.com/nvim-mini/mini.icons',        -- if you use standalone mini plugins
     -- 'https://github.com/nvim-tree/nvim-web-devicons', -- if you prefer nvim-web-devicons
-    'https://github.com/MeanderingProgrammer/render-markdown.nvim',
+    'https://github.com/BeckWlim/render-markdown.nvim',
 })
 require('render-markdown').setup({}) -- only mandatory if you want to set custom options
 ```
@@ -85,7 +92,7 @@ require('render-markdown').setup({}) -- only mandatory if you want to set custom
 
 ```lua
 {
-    'MeanderingProgrammer/render-markdown.nvim',
+    'BeckWlim/render-markdown.nvim',
     dependencies = { 'nvim-treesitter/nvim-treesitter', 'nvim-mini/mini.nvim' },            -- if you use the mini.nvim suite
     -- dependencies = { 'nvim-treesitter/nvim-treesitter', 'nvim-mini/mini.icons' },        -- if you use standalone mini plugins
     -- dependencies = { 'nvim-treesitter/nvim-treesitter', 'nvim-tree/nvim-web-devicons' }, -- if you prefer nvim-web-devicons
@@ -107,7 +114,7 @@ This plugin is available on [LuaRocks](https://luarocks.org/modules/MeanderingPr
 
 ```lua
 use({
-    'MeanderingProgrammer/render-markdown.nvim',
+    'BeckWlim/render-markdown.nvim',
     after = { 'nvim-treesitter' },
     requires = { 'nvim-mini/mini.nvim', opt = true },            -- if you use the mini.nvim suite
     -- requires = { 'nvim-mini/mini.icons', opt = true },        -- if you use standalone mini plugins
@@ -132,7 +139,7 @@ use({
 | `:RenderMarkdown get`           | `require('render-markdown').get()`          | Return current state                              |
 | `:RenderMarkdown set bool?`     | `require('render-markdown').set(bool?)`     | Sets state, `nil` to toggle                       |
 | `:RenderMarkdown set_buf bool?` | `require('render-markdown').set_buf(bool?)` | Sets state for current buffer, `nil` to toggle    |
-| `:RenderMarkdown preview`       | `require('render-markdown').preview()`      | Show rendered buffer to the side                  |
+| `:RenderMarkdown preview`       | `require('render-markdown').preview()`      | Toggle rendered preview and source                  |
 | `:RenderMarkdown log`           | `require('render-markdown').log()`          | Opens the log file for this plugin                |
 | `:RenderMarkdown expand`        | `require('render-markdown').expand()`       | Increase anti-conceal margin above and below by 1 |
 | `:RenderMarkdown contract`      | `require('render-markdown').contract()`     | Decrease anti-conceal margin above and below by 1 |
@@ -995,6 +1002,16 @@ require('render-markdown').setup({
     custom_handlers = {
         -- Mapping from treesitter language to user defined handlers.
         -- @see [Custom Handlers](doc/custom-handlers.md)
+    },
+    -- Source-mapped, same-window preview. Disable to use ordinary inline rendering.
+    preview = {
+        enabled = true,
+        auto_open = true,
+        mermaid = {
+            enabled = true,
+            command = 'termaid',
+            arrow_position = 'end',
+        },
     },
     yaml = {
         -- Turn on / off all yaml rendering.

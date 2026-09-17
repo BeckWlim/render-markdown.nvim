@@ -66,7 +66,40 @@ function M.buf_toggle()
 end
 
 function M.preview()
-    require('render-markdown.core.preview').open()
+    require('render-markdown.preview').toggle()
+end
+
+---Source buffer and position under a projected preview cursor.
+---@param win? integer
+---@return integer?, integer[]?
+function M.source_location(win)
+    local projected = package.loaded['render-markdown.preview']
+    if projected then
+        local window = (win == nil or win == 0)
+                and vim.api.nvim_get_current_win()
+            or win
+        return projected.source_location(window)
+    end
+end
+
+---Map a source position into the generated preview rows.
+---@param win integer
+---@param position integer[]
+---@return integer[]?
+function M.display_position(win, position)
+    local projected = package.loaded['render-markdown.preview']
+    if projected then
+        local window = win == 0 and vim.api.nvim_get_current_win() or win
+        return projected.display_position(window, position)
+    end
+end
+
+---Restore source before another UI takes over the window.
+function M.leave_preview()
+    local projected = package.loaded['render-markdown.preview']
+    if projected then
+        projected.leave()
+    end
 end
 
 function M.log()

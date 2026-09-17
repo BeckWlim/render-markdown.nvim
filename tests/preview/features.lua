@@ -75,10 +75,12 @@ local function build_object()
 end
 local object_key = features.block_key('object', { 80 })
 local original_object = assert(
-    features.cached_projection(cached_objects, object_key, 1, build_object)
+    features.cached_projection(cached_objects, object_key, 1, build_object),
+    'Expected preview test condition'
 )
 local moved_object = assert(
-    features.cached_projection(cached_objects, object_key, 3, build_object)
+    features.cached_projection(cached_objects, object_key, 3, build_object),
+    'Expected preview test condition'
 )
 assert(
     builds == 1

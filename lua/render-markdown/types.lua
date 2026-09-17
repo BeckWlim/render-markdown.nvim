@@ -42,6 +42,7 @@
 ---@field on? render.md.on.UserConfig
 ---@field completions? render.md.completions.UserConfig
 ---@field custom_handlers? table<string, render.md.Handler>
+---@field preview? render.md.preview.UserConfig
 
 ---@class (exact) render.md.anti.conceal.UserConfig
 ---@field enabled? boolean
@@ -318,3 +319,13 @@
 ---@field rendered? render.md.option.Value
 
 ---@class (exact) render.md.yaml.UserConfig: render.md.base.UserConfig
+
+---@class (exact) render.md.preview.UserConfig
+---@field enabled? boolean
+---@field auto_open? boolean
+---@field mermaid? render.md.preview.mermaid.UserConfig
+
+---@class (exact) render.md.preview.mermaid.UserConfig
+---@field enabled? boolean
+---@field command? string
+---@field arrow_position? 'end'|'middle'

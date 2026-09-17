@@ -48,12 +48,17 @@ function Config.new(root, enabled, buf, custom)
         config = vim.tbl_deep_extend('force', config, override or {})
     end
 
-    local src = require('render-markdown.core.preview').get(buf)
+    local src = require('render-markdown.preview').get(buf)
     extend(root.overrides.buflisted[env.buf.get(src or buf, 'buflisted')])
     extend(root.overrides.buftype[env.buf.get(src or buf, 'buftype')])
     extend(root.overrides.filetype[env.buf.get(src or buf, 'filetype')])
     extend(src and root.overrides.preview)
     extend(custom)
+    if src and root.preview.enabled then
+        config.anti_conceal.enabled = false
+        config.win_options.concealcursor.rendered = 'nvic'
+        config.pipe_table.enabled = false
+    end
 
     local self = setmetatable(config, Config)
     self.resolved = Resolved.new(config)

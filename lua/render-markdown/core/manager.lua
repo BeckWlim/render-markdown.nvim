@@ -60,20 +60,42 @@ function M.set(enable)
     for _, buf in ipairs(M.buffers) do
         M.set_buf(buf, state.enabled)
     end
+    local projected = package.loaded['render-markdown.preview']
+    if projected then
+        projected.sync_enabled()
+    end
 end
 
 ---@param buf? integer
 ---@param enable? boolean
 function M.set_buf(buf, enable)
-    buf = buf or env.buf.current()
-    if M.attached(buf) then
-        local config = state.get(buf)
+    local buffer = buf or env.buf.current()
+    if not vim.api.nvim_buf_is_valid(buffer) then
+        return
+    end
+    local projected = package.loaded['render-markdown.preview']
+    local source = projected and projected.get(buffer) or buffer
+    if
+        state.preview.enabled
+        and env.buf.get(source, 'buftype') == ''
+        and env.buf.get(source, 'filetype') == 'markdown'
+    then
+        local source_config = state.get(source)
+        source_config.enabled = enable == nil and not source_config.enabled
+            or enable == true
+        if projected then
+            projected.sync_enabled()
+        end
+        return
+    end
+    if M.attached(buffer) then
+        local config = state.get(buffer)
         if enable ~= nil then
             config.enabled = enable
         else
             config.enabled = not config.enabled
         end
-        ui.update(buf, env.buf.win(buf), 'UserCommand', true)
+        ui.update(buffer, env.buf.win(buffer), 'UserCommand', true)
     end
 end
 
@@ -161,6 +183,14 @@ function M.should_attach(buf)
         return false
     end
 
+    if
+        state.preview.enabled
+        and file_type == 'markdown'
+        and env.buf.get(buf, 'buftype') == ''
+    then
+        log.attach(buf, 'skip', 'projected preview source')
+        return false
+    end
     if state.ignore(buf) then
         log.attach(buf, 'skip', 'user ignore')
         return false
