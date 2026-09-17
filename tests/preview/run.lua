@@ -6,7 +6,8 @@ for _, path in ipairs({
     'tests/preview/features.lua',
     'tests/preview/table/cells.lua',
     'tests/preview/table/rendering.lua',
+    'tests/preview/mermaid.lua',
 }) do
     dofile(path)
 end
-vim.api.nvim_out_write('Projection and table tests passed\n')
+vim.api.nvim_out_write('Projection, table, and Mermaid tests passed\n')

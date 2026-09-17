@@ -14,6 +14,19 @@ This is separate from the existing custom-handler contract: custom handlers cont
 to return extmarks for upstream's renderer. Projection providers return real text
 rows so native cursor movement, selection, and yanking can reach continuations.
 
+`preview/mermaid.lua` is an optional provider. It discovers Mermaid fences and
+uses a declared lazy.nvim Termaid checkout when available, otherwise a conventional
+managed checkout or `termaid` on PATH. An explicit command overrides discovery.
+A declared but unbuilt checkout does not silently select an unrelated PATH tool.
+Missing executables leave fences unchanged without loading placeholders.
+
+Layout reserves measured or estimated rows and returns deferred tasks; it starts no
+processes. The compositor commits the frame before dispatch. The provider admits
+eight distinct diagrams, runs at most two jobs concurrently, and limits source,
+output, rows, chunks, and execution time. Content identities and generations reject
+stale completions; source extmarks associate changed elements with their previous
+render. Teardown cancels jobs and subscriptions. Failure restores source text.
+
 Run the focused checks without a user configuration:
 
 ```sh
