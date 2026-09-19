@@ -87,6 +87,10 @@ assert(
     'Generated table rows were included in Markdown parsing'
 )
 assert(
+    #prose_parser:trees() == #prose_regions,
+    'Projected preview did not parse every prose region'
+)
+assert(
     prose_regions[1][1][1] == 0
         and prose_regions[1][1][4] == 2
         and prose_regions[2][1][1] == #preview_lines - 2,

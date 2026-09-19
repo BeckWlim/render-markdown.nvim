@@ -241,6 +241,8 @@ local function parse_prose(buffer, rows)
         end
     end
     parser:set_included_regions(regions)
+    -- Finish all prose regions before the highlighter starts a viewport parse.
+    parser:parse(true)
 end
 
 local function restore_source(session, position)
