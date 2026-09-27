@@ -107,6 +107,17 @@ assert(
     'Source toggles changed native jump history'
 )
 
+-- An unloaded generated buffer must be rebuilt before restoring its cursor.
+local unloaded_preview = preview.open(source)
+vim.api.nvim_set_current_buf(before)
+vim.api.nvim_buf_delete(unloaded_preview, { unload = true, force = true })
+vim.api.nvim_set_current_buf(source)
+vim.api.nvim_win_set_cursor(0, { 7, 4 })
+preview.open(source)
+assert(vim.api.nvim_buf_line_count(vim.api.nvim_get_current_buf()) >= 7,
+    'Reopening an unloaded preview lost its rendered rows')
+preview.toggle()
+
 -- Hidden previews still belong to their source and must retire with it.
 local hidden_preview = preview.open(source)
 vim.api.nvim_set_current_buf(before)

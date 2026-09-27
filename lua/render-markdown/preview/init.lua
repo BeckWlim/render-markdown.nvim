@@ -506,7 +506,8 @@ end
 local function schedule_preview(source, window)
     vim.schedule(function()
         if
-            vim.api.nvim_buf_is_valid(source)
+            vim.v.exiting == vim.NIL
+            and vim.api.nvim_buf_is_valid(source)
             and vim.api.nvim_win_is_valid(window)
             and vim.api.nvim_get_current_win() == window
             and vim.api.nvim_win_get_buf(window) == source
@@ -819,6 +820,16 @@ function M.open(source)
             close(session)
         end,
     })
+    vim.api.nvim_create_autocmd('BufUnload', {
+        group = session.group,
+        buffer = buffer,
+        callback = function()
+            -- The buffer identity survives :bunload and failed quit attempts,
+            -- but its generated text does not. Rebuild it on the next entry.
+            session.rows = {}
+            session.changedtick = nil
+        end,
+    })
     vim.api.nvim_create_autocmd('BufWipeout', {
         group = session.group,
         buffer = buffer,
@@ -927,6 +938,21 @@ function M.setup(config)
         'markdown_default_preview',
         { clear = true }
     )
+    vim.api.nvim_create_autocmd('QuitPre', {
+        group = group,
+        callback = function()
+            -- Only source buffers own unsaved edits. Retire their generated
+            -- mirrors before native quit checks, including hidden previews.
+            local closing = {}
+            for _, session in pairs(sessions) do
+                closing[#closing + 1] = session
+            end
+            for _, session in ipairs(closing) do
+                close(session)
+            end
+        end,
+        desc = 'Delegate Markdown quit checks to the original source buffers',
+    })
     if not options.enabled then
         M.sync_enabled()
         return

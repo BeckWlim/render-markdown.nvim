@@ -10,6 +10,7 @@ for _, path in ipairs({
     'tests/preview/table/rendering.lua',
     'tests/preview/mermaid.lua',
     'tests/preview/jumps.lua',
+    'tests/preview/quit.lua',
     'tests/preview/preview.lua',
     'tests/preview/api.lua',
 }) do
