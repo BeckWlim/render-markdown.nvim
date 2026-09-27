@@ -600,6 +600,92 @@ assert(
 mermaid.detach(budget_buffer)
 vim.api.nvim_buf_delete(budget_buffer, { force = true })
 
+-- More than eight diagrams must drain through the bounded async queue after
+-- the preview frame is committed, without starting a process for every block.
+local saved_max_blocks = mermaid.max_blocks
+mermaid.max_blocks = 1
+local many_lines = {}
+for index = 1, 18 do
+    vim.list_extend(many_lines, {
+        '```mermaid',
+        'graph LR',
+        ('A%d --> B%d'):format(index, index),
+        '```',
+    })
+end
+local many_buffer, many_context = fixture(many_lines)
+many_context.width = 100
+process_requests = {}
+local many_reserved, many_tasks = mermaid.layout(many_context)
+assert(
+    #many_reserved == 18 and #process_requests == 0,
+    'The provider omitted later diagrams or started jobs before frame commit'
+)
+markdown_features.dispatch(many_tasks, function()
+    return true
+end)
+assert(
+    vim.wait(100, function()
+        return #process_requests == 1
+    end, 1),
+    'The first async turn exceeded the one-job admission budget'
+)
+for index = 1, 18 do
+    local request = process_requests[index]
+    assert(request, 'A pending Mermaid diagram was never started')
+    request.callback({
+        code = 0,
+        stdout = styled_output({
+            { { text = 'diagram ' .. index, style = 'label' } },
+        }),
+    })
+    local expected = math.min(index + 1, 18)
+    assert(
+        vim.wait(100, function()
+            return #process_requests == expected
+        end, 1),
+        'Mermaid completion did not admit the next diagram'
+    )
+end
+assert(
+    vim.wait(100, function()
+        local blocks = mermaid.stage(many_buffer)
+        if #blocks ~= 18 then return false end
+        for _, block in ipairs(blocks) do
+            if block.pending then return false end
+        end
+        return true
+    end, 1),
+    'The bounded queue did not finish the complete Markdown preview'
+)
+mermaid.detach(many_buffer)
+vim.api.nvim_buf_delete(many_buffer, { force = true })
+mermaid.max_blocks = saved_max_blocks
+
+-- Immediate size failures also drain in deferred batches, allowing the event
+-- loop to run between batches instead of scanning the whole document at once.
+local saved_source_bytes = mermaid.max_source_bytes
+mermaid.max_source_bytes = 1
+local limited_buffer, limited_context = fixture(many_lines)
+limited_context.width = 100
+process_requests = {}
+local _, limited_tasks = mermaid.layout(limited_context)
+local refreshes_before_limits = refreshes
+markdown_features.dispatch(limited_tasks, function()
+    return true
+end)
+assert(
+    vim.wait(100, function()
+        return refreshes >= refreshes_before_limits + 3
+    end, 1)
+        and #process_requests == 0
+        and #mermaid.stage(limited_buffer) == 0,
+    'Immediate render limits did not drain through deferred batches'
+)
+mermaid.detach(limited_buffer)
+vim.api.nvim_buf_delete(limited_buffer, { force = true })
+mermaid.max_source_bytes = saved_source_bytes
+
 -- Content identities survive prose edits and movement, including completions
 -- that arrive before the edited document is projected again.
 local incremental_buffer = fixture({

@@ -281,7 +281,10 @@ local function retire_state(state, keep_layout)
     end
     state.active = 0
     state.jobs = {}
+    state.pending = {}
+    state.pending_index = 1
     state.queue = {}
+    state.resume_scheduled = false
     if not keep_layout and vim.api.nvim_buf_is_valid(state.buffer) then
         vim.api.nvim_buf_clear_namespace(state.buffer, element_namespace, 0, -1)
     end
@@ -296,8 +299,11 @@ local function new_state(buffer, changedtick, width, generation, settings)
         changedtick = changedtick,
         generation = generation,
         jobs = {},
+        pending = {},
+        pending_index = 1,
         projections = {},
         queue = {},
+        resume_scheduled = false,
         results = {},
         settings = settings,
         width = width,
@@ -345,6 +351,21 @@ local function state_for(buffer, width)
     return next_state
 end
 
+-- Keep only a small admission window; the pending list is metadata, not
+-- running subprocesses. A completed job opens one slot for the next block.
+local function refill_queue(state)
+    while
+        state.active + #state.queue < M.max_blocks
+        and state.pending_index <= #state.pending
+    do
+        local block = state.pending[state.pending_index]
+        state.pending_index = state.pending_index + 1
+        if not state.results[block.key] and not state.jobs[block.key] then
+            state.queue[#state.queue + 1] = block
+        end
+    end
+end
+
 local function reconcile_blocks(buffer, state, root)
     local parsed_query = query()
     local blocks = {}
@@ -378,7 +399,7 @@ local function reconcile_blocks(buffer, state, root)
         blocks,
         state.results,
         state.jobs,
-        M.max_blocks
+        #blocks
     )
     local retained_anchors = {}
     for _, block in ipairs(blocks) do
@@ -435,9 +456,12 @@ local function reconcile_blocks(buffer, state, root)
             state.results[key] = nil
         end
     end
-    state.queue = plan.render
+    state.pending = plan.render
+    state.pending_index = 1
+    state.queue = {}
     state.elements = plan.by_key
     state.blocks = blocks
+    refill_queue(state)
     state.changedtick = vim.api.nvim_buf_get_changedtick(buffer)
 end
 
@@ -649,14 +673,39 @@ pump = function(buffer, state)
         return false
     end
     local settled = false
+    local started = 0
+    refill_queue(state)
     while
         states_by_buffer[buffer] == state
         and state.active < M.max_concurrent
         and #state.queue > 0
+        and started < M.max_blocks
     do
         local block = table.remove(state.queue, 1)
         start_request(buffer, state, block)
+        started = started + 1
         settled = settled or state.results[block.key] ~= nil
+        refill_queue(state)
+    end
+    -- Immediate failures also advance in small turns instead of monopolizing
+    -- Neovim's event loop. Process completions resume the normal path.
+    if
+        state.active == 0
+        and (#state.queue > 0 or state.pending_index <= #state.pending)
+        and not state.resume_scheduled
+    then
+        state.resume_scheduled = true
+        local generation = state.generation
+        vim.defer_fn(function()
+            state.resume_scheduled = false
+            if
+                states_by_buffer[buffer] == state
+                and state.generation == generation
+                and pump(buffer, state)
+            then
+                request_render(buffer)
+            end
+        end, 1)
     end
     return settled
 end

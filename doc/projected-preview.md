@@ -44,11 +44,13 @@ A declared but unbuilt checkout does not silently select an unrelated PATH tool.
 Missing executables leave fences unchanged without loading placeholders.
 
 Layout reserves measured or estimated rows and returns deferred tasks; it starts no
-processes. The compositor commits the frame before dispatch. The provider admits
-eight distinct diagrams, runs at most two jobs concurrently, and limits source,
-output, rows, chunks, and execution time. Content identities and generations reject
-stale completions; source extmarks associate changed elements with their previous
-render. Teardown cancels jobs and subscriptions. Failure restores source text.
+processes. The compositor commits the frame before dispatch. The provider
+admits at most eight Mermaid jobs at a time and runs at most two concurrently.
+Completion admits later diagrams until the document is rendered. Source, output,
+rows, chunks, and execution time remain bounded. Content identities and
+generations reject stale completions; source extmarks associate changed
+elements with their previous render. Teardown cancels jobs and subscriptions.
+Failure restores source text.
 
 `preview/providers.lua` assembles enabled providers. `preview/init.lua` owns the
 source/preview session, source anchors, generated buffer, window restoration,
