@@ -12,6 +12,7 @@ local M = {
     arrow_position = 'end',
 }
 local markdown_features = require('render-markdown.preview.features')
+local log = require('render-markdown.core.log')
 
 local states_by_buffer = {}
 local element_namespace =
@@ -503,12 +504,12 @@ local function request_render(buffer)
     markdown_features.request_render(buffer, 'MermaidRender')
 end
 
-local function report_failure(block, reason)
+local function report_failure(buffer, block, reason)
     local message = ('Mermaid line %d: %s; showing source.'):format(
         block.block_start + 1,
         reason
     )
-    vim.api.nvim_echo({ { message, 'WarningMsg' } }, true, {})
+    log.buf('error', 'Mermaid', buffer, message)
 end
 
 local pump
@@ -587,7 +588,7 @@ local function finish_request(buffer, state, request, completed_process)
             or ('render failed (exit %s)'):format(
                 tostring(completed_process.code)
             )
-        report_failure(request.block, reason)
+        report_failure(buffer, request.block, reason)
     end
     pump(buffer, state)
     request_render(buffer)

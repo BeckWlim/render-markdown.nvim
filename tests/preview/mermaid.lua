@@ -1,6 +1,17 @@
 -- Focused projection, fallback, and process-budget tests for Mermaid.
 local markdown_features = require('render-markdown.preview.features')
 local mermaid = require('render-markdown.preview.mermaid')
+local log = require('render-markdown.core.log')
+local log_state = require('render-markdown.state')
+local original_log_level = log_state.log_level
+local original_log_entries = log.entries
+log_state.log_level = 'error'
+log.entries = {}
+local function mermaid_logs()
+    return vim.tbl_filter(function(entry)
+        return entry.name == 'Mermaid'
+    end, log.entries)
+end
 local function message_history()
     return vim.api.nvim_exec2('messages', { output = true }).output
 end
@@ -383,7 +394,8 @@ for index = 2, #fallback_rows do
     )
 end
 assert(
-    not message_history():find('Mermaid line ', 1, true),
+    not message_history():find('Mermaid line ', 1, true)
+        and #mermaid_logs() == 0,
     'Successful renders or a recovered compatibility retry logged a render failure'
 )
 
@@ -396,6 +408,7 @@ mermaid.find_executable = function()
 end
 assert(#mermaid.parse(context) == 0, 'A fresh Mermaid render was not pending')
 vim.api.nvim_buf_set_name(buffer, '/tmp/termaid-errors.md')
+local history_before_failure = message_history()
 local error_before_failure = vim.v.errmsg
 local tick_before_failure = vim.api.nvim_buf_get_changedtick(buffer)
 process_requests[1].callback({
@@ -414,12 +427,15 @@ assert(
     'Failed Mermaid rendering did not retain raw source without retrying'
 )
 local failure_history = message_history()
+local failure_logs = mermaid_logs()
 assert(
-    failure_history:find('Mermaid line 2:', 1, true)
-        and failure_history:find('exit 1', 1, true)
-        and not failure_history:find('\n', 1, true)
-        and not failure_history:find('parse detail', 1, true),
-    'Mermaid failure did not produce a single-line warning without stderr'
+    failure_history == history_before_failure
+        and #failure_logs == 1
+        and failure_logs[1].message:find('Mermaid line 2:', 1, true)
+        and failure_logs[1].message:find('exit 1', 1, true)
+        and not failure_logs[1].message:find('\n', 1, true)
+        and not failure_logs[1].message:find('parse detail', 1, true),
+    'Mermaid failure was not logged without displaying a command-line message'
 )
 assert(
     vim.v.errmsg == error_before_failure
@@ -433,7 +449,7 @@ assert(
 )
 mermaid.parse(context)
 assert(
-    message_history() == failure_history,
+    message_history() == failure_history and #mermaid_logs() == 1,
     'A cached failed render repeated its error log'
 )
 
@@ -449,8 +465,10 @@ assert(
     'Timed-out render did not settle'
 )
 assert(
-    message_history():find('timed out after 4321 ms', 1, true),
-    'Timeout without stderr was lost from :messages'
+    message_history() == failure_history
+        and #mermaid_logs() == 2
+        and mermaid_logs()[2].message:find('timed out after 4321 ms', 1, true),
+    'Timeout without stderr was lost from the Markdown log'
 )
 
 mermaid.detach(buffer)
@@ -474,6 +492,7 @@ assert(
     'Editing Mermaid source did not cancel the stale renderer generation'
 )
 local history_before_stale = message_history()
+local log_count_before_stale = #mermaid_logs()
 process_requests[1].callback({
     code = 1,
     stderr = 'stale render failure',
@@ -482,7 +501,8 @@ process_requests[1].callback({
 vim.wait(20)
 assert(refreshes == 1, 'A stale Mermaid callback requested another render')
 assert(
-    message_history() == history_before_stale,
+    message_history() == history_before_stale
+        and #mermaid_logs() == log_count_before_stale,
     'A canceled render logged a stale error'
 )
 
@@ -495,7 +515,8 @@ process_requests[2].callback({
 })
 vim.wait(20)
 assert(
-    message_history() == history_before_stale,
+    message_history() == history_before_stale
+        and #mermaid_logs() == log_count_before_stale,
     'An edited source logged an obsolete render error'
 )
 
@@ -938,6 +959,8 @@ mermaid.find_executable = original.find_executable
 mermaid.max_concurrent = original.max_concurrent
 mermaid.start_process = original.start_process
 mermaid.timeout_ms = original.timeout
+log_state.log_level = original_log_level
+log.entries = original_log_entries
 mermaid.width_ratio = original.width_ratio
 mermaid.arrow_position = original.arrow_position
 markdown_features.request_render = original.feature_request_render
