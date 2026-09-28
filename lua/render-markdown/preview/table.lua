@@ -11,13 +11,16 @@ local table_query_cache
 local table_query_resolved = false
 
 local table_highlights = {
+    bold = 'RenderMarkdownTableBold',
     cell = 'RenderMarkdownTableCell',
     code = 'RenderMarkdownTableCode',
     header = 'RenderMarkdownTableHeader',
     icon = 'RenderMarkdownTableIcon',
+    italic = 'RenderMarkdownTableItalic',
     label = 'RenderMarkdownTableLabel',
     row_rule = 'RenderMarkdownTableRowRule',
     rule = 'RenderMarkdownTableRule',
+    strikethrough = 'RenderMarkdownTableStrikethrough',
 }
 
 local function table_query()
@@ -36,91 +39,99 @@ local function display_width(text)
     return vim.fn.strdisplaywidth(text)
 end
 
-local function cell_display_text(raw_text)
-    local normalized_text = raw_text:gsub('\r', '')
-    local image_labels_removed =
-        normalized_text:gsub('!%[([^%]]-)%]%([^%)]-%)', '%1')
-    local link_destinations_removed =
-        image_labels_removed:gsub('%[([^%]]-)%]%([^%)]-%)', '%1')
-    local code_ticks_removed = link_destinations_removed:gsub('`([^`]-)`', '%1')
-    local unescaped_pipes = code_ticks_removed:gsub('\\|', '|')
-    return vim.trim(unescaped_pipes)
-end
+local emphasis_styles = {
+    strong_emphasis = 'bold',
+    emphasis = 'italic',
+    strikethrough = 'strikethrough',
+}
 
-local function append_display_characters(target, text, is_code, source_start)
+local function append_display_characters(target, text, styles, source_start)
     local next_byte = 1
     while next_byte <= #text do
         local escaped_pipe = text:sub(next_byte, next_byte + 1) == '\\|'
         local character_text = escaped_pipe and '|'
             or vim.fn.strcharpart(text:sub(next_byte), 0, 1)
         local source_width = escaped_pipe and 2 or #character_text
-        target[#target + 1] = {
-            is_code = is_code,
-            source_end = source_start + next_byte - 1 + source_width,
-            source_start = source_start + next_byte - 1,
-            text = character_text,
-        }
+        if character_text ~= '\r' then
+            target[#target + 1] = {
+                styles = styles,
+                source_end = source_start + next_byte - 1 + source_width,
+                source_start = source_start + next_byte - 1,
+                text = character_text,
+            }
+        end
         next_byte = next_byte + source_width
     end
 end
 
-local function display_markup(raw_text, next_byte)
-    local prefix = raw_text:sub(next_byte, next_byte)
-    local pattern
-    local is_code = false
-    if prefix == '!' and raw_text:sub(next_byte + 1, next_byte + 1) == '[' then
-        pattern = '!%[()([^%]]-)%]%([^%)]-%)'
-    elseif prefix == '[' then
-        pattern = '%[()([^%]]-)%]%([^%)]-%)'
-    elseif prefix == '`' then
-        pattern = '`()([^`]*)`'
-        is_code = true
-    else
-        return nil
-    end
-    local markup_start, markup_end, content_start, content =
-        raw_text:find(pattern, next_byte)
-    if markup_start ~= next_byte then
-        return nil
-    end
-    return markup_end, content_start - 1, content, is_code
-end
-
 local function cell_display_characters(raw_text)
     local source_characters = {}
-    local next_byte = 1
-    while next_byte <= #raw_text do
-        local markup_end, content_start, content, is_code =
-            display_markup(raw_text, next_byte)
-        if markup_end then
+    -- Use the inline grammar so escaped, unmatched and code-span markers stay literal.
+    local parsed, parser =
+        pcall(vim.treesitter.get_string_parser, raw_text, 'markdown_inline')
+    if parsed then
+        local tree = parser:parse()[1]
+        local function append_range(first, last, styles)
             append_display_characters(
                 source_characters,
-                content,
-                is_code,
-                content_start
+                raw_text:sub(first + 1, last),
+                styles,
+                first
             )
-            next_byte = markup_end + 1
-        elseif raw_text:sub(next_byte, next_byte + 1) == '\\|' then
-            source_characters[#source_characters + 1] = {
-                is_code = false,
-                source_end = next_byte + 1,
-                source_start = next_byte - 1,
-                text = '|',
-            }
-            next_byte = next_byte + 2
-        else
-            local character_text =
-                vim.fn.strcharpart(raw_text:sub(next_byte), 0, 1)
-            if character_text ~= '\r' then
-                append_display_characters(
-                    source_characters,
-                    character_text,
-                    false,
-                    next_byte - 1
-                )
-            end
-            next_byte = next_byte + #character_text
         end
+        local function visit(node, inherited_styles)
+            local node_type = node:type()
+            local _, _, first = node:start()
+            local _, _, last = node:end_()
+            if
+                node_type == 'emphasis_delimiter'
+                or node_type == 'code_span_delimiter'
+            then
+                return
+            elseif node_type == 'backslash_escape' then
+                append_range(first + 1, last, inherited_styles)
+                return
+            elseif node_type == 'inline_link' or node_type == 'image' then
+                for child in node:iter_children() do
+                    if
+                        child:type() == 'link_text'
+                        or child:type() == 'image_description'
+                    then
+                        visit(child, inherited_styles)
+                    end
+                end
+                return
+            end
+            local styles = vim.tbl_extend('force', {}, inherited_styles)
+            local emphasis_style = emphasis_styles[node_type]
+            if emphasis_style then
+                styles[emphasis_style] = true
+            elseif node_type == 'code_span' then
+                styles.code = true
+                local opening = node:named_child(0)
+                local closing = node:named_child(node:named_child_count() - 1)
+                if opening and closing then
+                    local _, _, content_start = opening:end_()
+                    local _, _, content_end = closing:start()
+                    append_range(content_start, content_end, styles)
+                    return
+                end
+            end
+            local next_byte = first
+            for child in node:iter_children() do
+                local _, _, child_start = child:start()
+                local _, _, child_end = child:end_()
+                append_range(next_byte, child_start, styles)
+                visit(child, styles)
+                next_byte = child_end
+            end
+            append_range(next_byte, last, styles)
+        end
+        if tree then
+            visit(tree:root(), {})
+        end
+    else
+        append_display_characters(source_characters, raw_text, {}, 0)
     end
 
     local display_characters = {}
@@ -213,9 +224,12 @@ local function wrap_cell_characters(text, width)
             if separator_width > 0 then
                 local preceding_character = current_line[#current_line]
                 local following_character = remaining_word[1]
+                local separator_styles = {}
+                for style in pairs(preceding_character.styles) do
+                    separator_styles[style] = following_character.styles[style]
+                end
                 current_line[#current_line + 1] = {
-                    is_code = preceding_character.is_code
-                        and following_character.is_code,
+                    styles = separator_styles,
                     source_end = following_character.source_start,
                     source_start = preceding_character.source_end,
                     text = ' ',
@@ -253,13 +267,25 @@ end
 local function characters_chunks(characters, base_highlight)
     local chunks = {}
     for _, character in ipairs(characters) do
-        local character_highlight = character.is_code and table_highlights.code
+        local character_highlight = character.styles.code
+                and table_highlights.code
             or base_highlight
+        local highlights = { character_highlight }
+        for _, style in ipairs({ 'bold', 'italic', 'strikethrough' }) do
+            if character.styles[style] then
+                highlights[#highlights + 1] = table_highlights[style]
+            end
+        end
+        local chunk_highlight = #highlights > 1 and highlights
+            or character_highlight
         local previous_chunk = chunks[#chunks]
-        if previous_chunk and previous_chunk[2] == character_highlight then
+        if
+            previous_chunk
+            and vim.deep_equal(previous_chunk[2], chunk_highlight)
+        then
             previous_chunk[1] = previous_chunk[1] .. character.text
         else
-            chunks[#chunks + 1] = { character.text, character_highlight }
+            chunks[#chunks + 1] = { character.text, chunk_highlight }
         end
     end
     return chunks
@@ -275,7 +301,7 @@ end
 ---@param text string
 ---@param width integer
 ---@param base_highlight string
----@return [string, string][][]
+---@return [string, string|string[]][][]
 function M.wrap_cell_chunks(text, width, base_highlight)
     return vim.tbl_map(function(characters)
         return characters_chunks(characters, base_highlight)
@@ -513,7 +539,7 @@ local function preferred_column_widths(rows, column_count)
         for _, row in ipairs(rows) do
             widths[column] = math.max(
                 widths[column],
-                display_width(cell_display_text(row.cells[column]))
+                characters_width(cell_display_characters(row.cells[column]))
             )
         end
     end

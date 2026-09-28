@@ -61,6 +61,9 @@ M.colors = {
     TableHeader     = 'RenderMarkdownTableHead',
     TableCell       = 'RenderMarkdownTableRow',
     TableCode       = 'RenderMarkdownCodeInline',
+    TableBold       = '@markup.strong',
+    TableItalic     = '@markup.italic',
+    TableStrikethrough = '@markup.strikethrough',
     TableIcon       = 'RenderMarkdownTableHead',
     TableLabel      = 'RenderMarkdownTableHead',
     -- Optional Termaid projection

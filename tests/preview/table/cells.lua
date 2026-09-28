@@ -1,6 +1,62 @@
 -- Focused cell allocation and wrapping tests for render-markdown.preview.table.
 local markdown = require('render-markdown.preview.table')
 
+assert(
+    vim.deep_equal(
+        markdown.wrap_cell('**bold** and __strong__', 40),
+        { 'bold and strong' }
+    ),
+    'Markdown table displayed strong-emphasis delimiters'
+)
+assert(
+    vim.deep_equal(markdown.wrap_cell_chunks('**alpha beta**', 5, 'Cell'), {
+        { { 'alpha', { 'Cell', 'RenderMarkdownTableBold' } } },
+        { { 'beta', { 'Cell', 'RenderMarkdownTableBold' } } },
+    }),
+    'Markdown table lost bold styling across wrapped fragments'
+)
+assert(
+    vim.deep_equal(
+        markdown.wrap_cell_chunks('***both*** ~~gone~~', 40, 'Cell'),
+        {
+            {
+                {
+                    'both',
+                    {
+                        'Cell',
+                        'RenderMarkdownTableBold',
+                        'RenderMarkdownTableItalic',
+                    },
+                },
+                { ' ', 'Cell' },
+                { 'gone', { 'Cell', 'RenderMarkdownTableStrikethrough' } },
+            },
+        }
+    ),
+    'Markdown table lost nested emphasis or strikethrough'
+)
+assert(
+    vim.deep_equal(markdown.wrap_cell_chunks('[**label**](url)', 40, 'Cell'), {
+        { { 'label', { 'Cell', 'RenderMarkdownTableBold' } } },
+    }),
+    'Markdown table lost emphasis inside a link label'
+)
+assert(
+    vim.deep_equal(
+        markdown.wrap_cell('`**literal**` \\*escaped\\* foo_bar **open', 80),
+        {
+            '**literal** *escaped* foo_bar **open',
+        }
+    ),
+    'Markdown table concealed literal or unmatched emphasis markers'
+)
+assert(
+    markdown.cell_fragment('**甲乙** tail', 5, 2) == 2
+        and markdown.cell_fragment('**alpha beta** tail', 8, 5) == 2
+        and markdown.cell_fragment('**alpha beta** tail', 15, 5) == 3,
+    'Markdown table emphasis changed source byte offsets'
+)
+
 local allocated_widths, gap_width = markdown.allocate_widths(80, 3)
 assert(
     gap_width == 2,

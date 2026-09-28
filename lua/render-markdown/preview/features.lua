@@ -1,6 +1,6 @@
 -- Shared contract: features replace source ranges with real display rows. Each
 -- row carries semantic chunks and a source row; optional byte spans map cells.
----@alias MarkdownPreviewChunk { [1]: string, [2]: string? }
+---@alias MarkdownPreviewChunk { [1]: string, [2]: (string|string[])? }
 ---@class MarkdownSourceSpan
 ---@field first integer First preview byte (inclusive).
 ---@field last integer Last preview byte (exclusive).

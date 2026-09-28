@@ -16,7 +16,7 @@ vim.api.nvim_set_current_buf(source)
 vim.api.nvim_buf_set_lines(source, 0, -1, false, {
     '# API preview',
     '',
-    '| Key | Value |',
+    '| **Key** | Value |',
     '|---|---|',
     '| item | ' .. string.rep('wrapped cell ', 40) .. '|',
     '',
@@ -55,6 +55,35 @@ renderer.preview()
 local projected = vim.api.nvim_get_current_buf()
 local projected_text =
     table.concat(vim.api.nvim_buf_get_lines(projected, 0, -1, false), '\n')
+assert(
+    not projected_text:find('**Key**', 1, true),
+    'Public preview retained table emphasis delimiters'
+)
+local bold_table_mark = false
+for _, mark in
+    ipairs(
+        vim.api.nvim_buf_get_extmarks(projected, -1, 0, -1, { details = true })
+    )
+do
+    local highlight = mark[4].hl_group
+    if
+        highlight == 'RenderMarkdownTableBold'
+        or (
+            type(highlight) == 'table'
+            and vim.tbl_contains(highlight, 'RenderMarkdownTableBold')
+        )
+    then
+        bold_table_mark = true
+    end
+end
+assert(
+    bold_table_mark,
+    'Public preview did not apply stacked table emphasis highlights'
+)
+assert(
+    vim.api.nvim_get_hl(0, { name = 'RenderMarkdownTableBold', link = false }).bold,
+    'Table emphasis highlight does not resolve to bold text'
+)
 assert(
     projected ~= source and #vim.api.nvim_list_wins() == windows,
     'Preview changed window layout'

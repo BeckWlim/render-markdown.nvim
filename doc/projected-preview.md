@@ -66,8 +66,18 @@ are disabled only in projected buffers that already contain generated tables.
 Every generated row is a real buffer line, so native cursor movement, Visual
 selection, scrolling, and yanking operate on displayed text. `q` and `<C-q>` return
 to source; Enter retains native next-line movement. Normal editing keys restore the
-mapped source position and replay native counts and registers. Returning to Normal
-mode restores preview after a quick edit; explicitly selected source stays raw.
+mapped source position and replay native counts and registers. Visual delete,
+change, replace, paste, indent, join, and case conversion map both selection
+endpoints to source and replay the native command. Characterwise selections edit
+the contiguous source range between those endpoints; linewise selections edit
+whole source rows, including when selecting a wrapped table continuation. Block
+edits work on unchanged prose; selections crossing generated table or diagram rows
+require source mode because their display columns do not form a source rectangle.
+Visual text objects, endpoint motions, and yanks retain their native preview behavior.
+Background refreshes wait until Visual mode ends. If the source changes meanwhile,
+the edit asks you to leave Visual mode and select again against the refreshed text.
+Returning to Normal mode restores preview after a quick edit; explicitly selected
+source stays raw.
 `:write`, `:update`, undo, and redo target the original buffer. Native write hooks,
 readonly and external-change checks, encoding, and forced writes remain in effect.
 

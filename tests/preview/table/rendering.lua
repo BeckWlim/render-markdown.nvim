@@ -149,4 +149,49 @@ assert(
         and wider_tables[2].rows[2].chunks ~= moved_tables[2].rows[2].chunks,
     'Resizing reused table layouts for the old width'
 )
+local emphasized_source = {
+    '| **Key** | *Value* |',
+    '|---|---|',
+    '| **alpha beta** | ~~gone~~ |',
+}
+vim.api.nvim_buf_set_lines(buffer, 0, -1, false, emphasized_source)
+local emphasized_blocks = project_tables(18)
+local bold_fragments = 0
+for _, row in ipairs(emphasized_blocks[1].rows) do
+    local parts = {}
+    for _, chunk in ipairs(row.chunks) do
+        parts[#parts + 1] = chunk[1]
+        if
+            row.source_row == 2
+            and type(chunk[2]) == 'table'
+            and vim.tbl_contains(chunk[2], 'RenderMarkdownTableBold')
+        then
+            bold_fragments = bold_fragments + 1
+        end
+    end
+    local rendered_text = table.concat(parts)
+    assert(not rendered_text:find('[*~]'), 'Table retained emphasis markers')
+    for _, span in ipairs(row.spans or {}) do
+        local source_text = emphasized_source[row.source_row + 1]
+        assert(
+            rendered_text:sub(span.first + 1, span.last)
+                == source_text:sub(
+                    span.source_column + 1,
+                    span.source_column + span.last - span.first
+                ),
+            'Emphasized table character maps to the wrong source byte'
+        )
+    end
+end
+assert(bold_fragments == 2, 'Table lost bold styling on wrapped content')
+vim.api.nvim_buf_set_lines(buffer, 0, -1, false, {
+    '| Key | Value |',
+    '|---|---|',
+    '| alpha beta | gone |',
+})
+local plain_blocks = project_tables(18)
+assert(
+    vim.deep_equal(emphasized_blocks[1].layout, plain_blocks[1].layout),
+    'Concealed emphasis markers changed table dimensions'
+)
 vim.api.nvim_buf_delete(buffer, { force = true })

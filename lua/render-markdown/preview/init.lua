@@ -492,6 +492,12 @@ local function schedule_refresh(session)
             session.pending = false
             return
         end
+        -- A selection belongs to the displayed frame. Do not move its endpoints
+        -- when a provider finishes or the window is resized.
+        if vim.api.nvim_get_mode().mode ~= 'n' then
+            vim.defer_fn(apply_when_idle, 80)
+            return
+        end
         local quiet_ms = (vim.uv.hrtime() - session.last_activity_ns) / 1e6
         if quiet_ms < 120 then
             vim.defer_fn(apply_when_idle, math.ceil(120 - quiet_ms))
@@ -520,15 +526,62 @@ local function schedule_preview(source, window)
     end)
 end
 
+local function visual_selection(session)
+    local mode = vim.api.nvim_get_mode().mode
+    if mode ~= 'v' and mode ~= 'V' and mode ~= '\22' then
+        return
+    end
+    local anchor = vim.fn.getpos('v')
+    local cursor = vim.fn.getcurpos()
+    local first_row = math.min(anchor[2], cursor[2])
+    local last_row = math.max(anchor[2], cursor[2])
+    if mode == '\22' then
+        for index = first_row, last_row do
+            if not session.rows[index].identity then
+                vim.notify(
+                    'Block edits across generated Markdown require source mode (q); use v or V for a mapped range.',
+                    vim.log.levels.WARN
+                )
+                return false
+            end
+        end
+    end
+    return {
+        mode = mode,
+        anchor = clamp_source_position(
+            session.source,
+            features.source_position(session.rows[anchor[2]], anchor[3] - 1)
+        ),
+        cursor = clamp_source_position(
+            session.source,
+            features.source_position(session.rows[cursor[2]], cursor[3] - 1)
+        ),
+        anchor_offset = anchor[4],
+        cursor_offset = cursor[4],
+        curswant = cursor[5],
+    }
+end
+
 local function edit_source(session, keys)
     if not live(session) then
         return
     end
     local count = vim.v.count > 0 and tostring(vim.v.count) or ''
     local register = vim.v.register
+    local selection = visual_selection(session)
+    if selection == false then
+        return
+    end
     if
         session.changedtick ~= vim.api.nvim_buf_get_changedtick(session.source)
     then
+        if selection then
+            vim.notify(
+                'Markdown source changed during selection; leave Visual mode and select again.',
+                vim.log.levels.WARN
+            )
+            return
+        end
         M.refresh(session.source)
     end
     local position =
@@ -536,8 +589,32 @@ local function edit_source(session, keys)
     -- Suppress automatic preview entry while restoring the source. Native keys
     -- then own counts, registers, motions, repeat, and the source undo history.
     vim.b[session.source].markdown_preview_disabled = true
+    if selection then
+        vim.cmd('normal! ' .. vim.keycode('<Esc>'))
+    end
     restore_source(session, position)
     vim.cmd('normal! zv')
+    if selection then
+        -- Enter Visual before placing the anchor: it may be one byte past EOL,
+        -- which Normal mode would clamp to the final character.
+        vim.cmd('normal! ' .. selection.mode)
+        vim.fn.setpos('.', {
+            0,
+            selection.anchor[1],
+            selection.anchor[2] + 1,
+            selection.anchor_offset,
+        })
+        vim.cmd('normal! o')
+        vim.fn.setpos('.', {
+            0,
+            selection.cursor[1],
+            selection.cursor[2] + 1,
+            selection.cursor_offset,
+        })
+        if selection.mode == '\22' and selection.curswant == vim.v.maxcol then
+            vim.cmd('normal! $')
+        end
+    end
     vim.b[session.source].markdown_preview_disabled = false
     vim.api.nvim_feedkeys(
         vim.keycode('"' .. register .. count .. keys),
@@ -707,6 +784,45 @@ function M.open(source)
             buffer = buffer,
             silent = true,
             desc = 'Edit Markdown source at cursor',
+        })
+    end
+    -- Visual i/a and o/O are text objects and endpoint motions, not edits.
+    -- Yanks keep their native displayed-text behavior in the projection.
+    for _, keys in ipairs({
+        'd',
+        'D',
+        'x',
+        'X',
+        '<Del>',
+        'c',
+        'C',
+        's',
+        'S',
+        'r',
+        'R',
+        'p',
+        'P',
+        'I',
+        'A',
+        'J',
+        'gJ',
+        '>',
+        '<',
+        '=',
+        '~',
+        'u',
+        'U',
+        'gu',
+        'gU',
+        'g~',
+        'g?',
+    }) do
+        vim.keymap.set('x', keys, function()
+            edit_source(session, keys)
+        end, {
+            buffer = buffer,
+            silent = true,
+            desc = 'Edit selected Markdown source',
         })
     end
     for _, keys in ipairs({ 'u', '<C-r>' }) do
