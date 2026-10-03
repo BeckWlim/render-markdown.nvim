@@ -24,10 +24,10 @@ function M.project(context)
     )
 end
 
-function M.detach(buffer)
+function M.detach(buffer, view)
     for _, feature in ipairs(all_features) do
         if feature.detach then
-            feature.detach(buffer)
+            feature.detach(buffer, view)
         end
     end
 end

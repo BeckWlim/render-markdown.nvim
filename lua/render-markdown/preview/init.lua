@@ -4,6 +4,7 @@ local markdown = require('render-markdown.preview.providers')
 local namespace = vim.api.nvim_create_namespace('markdown_preview')
 local cursor_namespace =
     vim.api.nvim_create_namespace('markdown_preview_cursor')
+-- Source buffers share edits; every window owns its projection and cursor.
 local sessions = {}
 local sessions_by_preview = {}
 local options = vim.deepcopy(require('render-markdown.preview.config').default)
@@ -63,8 +64,23 @@ local function preview_options(session)
     vim.wo[window].winbar = ''
 end
 
+local function registered(session)
+    local windows = sessions[session.source]
+    return windows and windows[session.window] == session
+end
+
+local function all_sessions()
+    local result = {}
+    for _, windows in pairs(sessions) do
+        for _, session in pairs(windows) do
+            result[#result + 1] = session
+        end
+    end
+    return result
+end
+
 local function live(session)
-    return sessions[session.source] == session
+    return registered(session)
         and vim.api.nvim_buf_is_valid(session.source)
         and vim.api.nvim_win_is_valid(session.window)
         and vim.api.nvim_win_get_buf(session.window) == session.buffer
@@ -266,7 +282,7 @@ local function sync_modified(session)
 end
 
 local function close(session, buffer_wiping)
-    if sessions[session.source] ~= session then
+    if not registered(session) then
         return
     end
     local returning_to_source = live(session)
@@ -275,10 +291,16 @@ local function close(session, buffer_wiping)
     local position = live(session)
             and clamp_source_position(session.source, source_position(session))
         or nil
-    sessions[session.source] = nil
+    local windows = sessions[session.source]
+    windows[session.window] = nil
+    local last_view = next(windows) == nil
+    markdown.detach(session.source, session.buffer)
+    if last_view then
+        sessions[session.source] = nil
+        features.forget_buffer(session.source)
+        markdown.detach(session.source)
+    end
     sessions_by_preview[session.buffer] = nil
-    features.forget_buffer(session.source)
-    markdown.detach(session.source)
     pcall(vim.api.nvim_del_augroup_by_id, session.group)
     if vim.api.nvim_buf_is_valid(session.source) then
         if returning_to_source then
@@ -307,7 +329,7 @@ local function close(session, buffer_wiping)
             set_buffer(session.window, replacement)
         end
     end
-    if vim.api.nvim_buf_is_valid(session.source) then
+    if last_view and vim.api.nvim_buf_is_valid(session.source) then
         vim.bo[session.source].bufhidden = session.source_bufhidden
     end
     if not buffer_wiping and vim.api.nvim_buf_is_valid(session.buffer) then
@@ -364,6 +386,7 @@ local function project(session)
     local window_info = vim.fn.getwininfo(session.window)[1] or { textoff = 0 }
     return markdown.project({
         buf = session.source,
+        view = session.buffer,
         root = tree:root(),
         width = math.max(
             1,
@@ -373,9 +396,8 @@ local function project(session)
     })
 end
 
-function M.refresh(source)
-    local session = sessions[source]
-    if not session or not live(session) then
+local function refresh_session(session)
+    if not live(session) then
         return
     end
     local anchor_position = session.anchor
@@ -393,7 +415,7 @@ function M.refresh(source)
     local projected_rows, render_tasks = project(session)
     local function dispatch()
         features.dispatch(render_tasks, function()
-            return sessions[source] == session
+            return registered(session)
         end)
     end
     session.changedtick = vim.api.nvim_buf_get_changedtick(session.source)
@@ -482,6 +504,12 @@ function M.refresh(source)
     dispatch()
 end
 
+function M.refresh(source)
+    for _, session in pairs(sessions[source] or {}) do
+        refresh_session(session)
+    end
+end
+
 local function schedule_refresh(session)
     if session.pending then
         return
@@ -504,7 +532,7 @@ local function schedule_refresh(session)
             return
         end
         session.pending = false
-        M.refresh(session.source)
+        refresh_session(session)
     end
     vim.defer_fn(apply_when_idle, 80)
 end
@@ -628,11 +656,23 @@ end
 
 function M.open(source)
     local window = vim.api.nvim_get_current_win()
-    local existing = sessions[source]
-    if existing and live(existing) and existing.window == window then
+    local windows = sessions[source]
+    local existing = windows and windows[window]
+    local copied = sessions_by_preview[vim.api.nvim_win_get_buf(window)]
+    if copied and copied.window ~= window then
+        local cursor = vim.api.nvim_win_get_cursor(window)
+        local row = copied.rows[cursor[1]]
+        local position = row and features.source_position(row, cursor[2]) or { 1, 0 }
+        set_buffer(window, source)
+        for name, value in pairs(copied.source_options) do
+            vim.wo[window][name] = value
+        end
+        vim.api.nvim_win_set_cursor(window, clamp_source_position(source, position))
+    end
+    if existing and live(existing) then
         return existing.buffer
     end
-    if existing and existing.window == window then
+    if existing then
         local source_cursor = vim.api.nvim_win_get_cursor(window)
         existing.source_view = vim.fn.winsaveview()
         for _, name in ipairs(window_option_names) do
@@ -653,16 +693,14 @@ function M.open(source)
         highlight_cursor(existing)
         return existing.buffer
     end
-    if existing then
-        close(existing)
-    end
     local source_cursor = vim.api.nvim_win_get_cursor(window)
     local source_view = vim.fn.winsaveview()
     local source_options = {}
     for _, name in ipairs(window_option_names) do
         source_options[name] = vim.wo[window][name]
     end
-    local source_bufhidden = vim.bo[source].bufhidden
+    local _, sibling = next(windows or {})
+    local source_bufhidden = sibling and sibling.source_bufhidden or vim.bo[source].bufhidden
     vim.bo[source].bufhidden = 'hide'
     vim.b[source].markdown_preview_disabled = false
     local buffer = vim.api.nvim_create_buf(false, true)
@@ -673,7 +711,7 @@ function M.open(source)
     vim.bo[buffer].swapfile = false
     vim.bo[buffer].undolevels = -1
     vim.b[buffer].markdown_preview_source = source
-    vim.api.nvim_buf_set_name(buffer, ('markdown-preview://%d'):format(source))
+    vim.api.nvim_buf_set_name(buffer, ('markdown-preview://%d/%d'):format(source, window))
     vim.wo[window].foldmethod = 'manual'
     set_buffer(window, buffer)
     local session = {
@@ -691,7 +729,8 @@ function M.open(source)
             { clear = true }
         ),
     }
-    sessions[source] = session
+    if not sessions[source] then sessions[source] = {} end
+    sessions[source][window] = session
     sessions_by_preview[buffer] = session
     vim.api.nvim_create_autocmd('BufWriteCmd', {
         group = session.group,
@@ -718,7 +757,9 @@ function M.open(source)
     })
     preview_options(session)
     features.subscribe(source, function()
-        schedule_refresh(session)
+        for _, view in pairs(sessions[source] or {}) do
+            schedule_refresh(view)
+        end
     end)
     local close_preview = function()
         close(session)
@@ -1014,7 +1055,7 @@ end
 -- Match upstream enable/disable APIs while keeping explicit source preference.
 function M.sync_enabled()
     local retired = {}
-    for _, session in pairs(sessions) do
+    for _, session in ipairs(all_sessions()) do
         if not enabled(session.source) then
             retired[#retired + 1] = session
         end
@@ -1037,7 +1078,7 @@ end
 
 function M.setup(config)
     local retired = {}
-    for _, session in pairs(sessions) do
+    for _, session in ipairs(all_sessions()) do
         retired[#retired + 1] = session
     end
     for _, session in ipairs(retired) do
@@ -1057,17 +1098,31 @@ function M.setup(config)
     vim.api.nvim_create_autocmd('QuitPre', {
         group = group,
         callback = function()
-            -- Only source buffers own unsaved edits. Retire their generated
-            -- mirrors before native quit checks, including hidden previews.
-            local closing = {}
-            for _, session in pairs(sessions) do
-                closing[#closing + 1] = session
+            local window = vim.api.nvim_get_current_win()
+            local focused = sessions_by_preview[vim.api.nvim_win_get_buf(window)]
+            local tiled = 0
+            for _, candidate in ipairs(vim.api.nvim_list_wins()) do
+                if vim.api.nvim_win_get_config(candidate).relative == '' then
+                    tiled = tiled + 1
+                end
             end
-            for _, session in ipairs(closing) do
-                close(session)
+            local command = vim.trim(vim.fn.getcmdline())
+            local quitting_all = command:match('^qa') or command:match('^wqa')
+                or command:match('^xa')
+            -- Native :q checks the focused view. Other projections retain their
+            -- source maps and jump targets until their own window is closed.
+            if tiled == 1 or quitting_all then
+                for _, session in ipairs(all_sessions()) do
+                    close(session)
+                end
+            elseif focused and focused.window == window then
+                close(focused)
+            end
+            if vim.api.nvim_win_is_valid(window) then
+                vim.api.nvim_set_current_win(window)
             end
         end,
-        desc = 'Delegate Markdown quit checks to the original source buffers',
+        desc = 'Delegate focused Markdown quit checks to its source buffer',
     })
     if not options.enabled then
         M.sync_enabled()
@@ -1076,6 +1131,18 @@ function M.setup(config)
     local function render_when_normal(event)
         local buffer = event.buf
         local window = vim.api.nvim_get_current_win()
+        local copied = sessions_by_preview[buffer]
+        if copied then
+            if copied.window ~= window then
+                vim.schedule(function()
+                    if registered(copied) and vim.api.nvim_win_is_valid(window)
+                        and vim.api.nvim_win_get_buf(window) == buffer then
+                        vim.api.nvim_win_call(window, function() M.open(copied.source) end)
+                    end
+                end)
+            end
+            return
+        end
         if
             vim.bo[buffer].filetype ~= 'markdown'
             or vim.bo[buffer].buftype ~= ''
@@ -1090,7 +1157,7 @@ function M.setup(config)
         end
         schedule_preview(buffer, window)
     end
-    vim.api.nvim_create_autocmd({ 'FileType', 'BufWinEnter', 'TextChanged' }, {
+    vim.api.nvim_create_autocmd({ 'FileType', 'BufWinEnter', 'WinEnter', 'TextChanged' }, {
         group = group,
         callback = render_when_normal,
         desc = 'Show Markdown files rendered by default in their current pane',

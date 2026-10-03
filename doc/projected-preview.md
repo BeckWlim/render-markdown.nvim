@@ -82,8 +82,11 @@ source stays raw.
 readonly and external-change checks, encoding, and forced writes remain in effect.
 
 Buffer switches preserve jump history. Hidden previews survive navigation and quick
-edits. Explicit source selection, source deletion, or window closure retires the
-session, its subscriptions, and provider jobs. Refreshes wait for navigation to be
+edits. Every window of a source owns its generated buffer, source map, cursor,
+and width-specific provider jobs. Native splits create independent projections;
+closing or replacing a pane preserves its siblings. Explicit source selection or
+window closure retires only that view. Source deletion retires all its views;
+source subscriptions remain active until the last view closes. Refreshes wait for navigation to be
 idle and preserve unchanged object rows. Hidden source buffers receive native file
 change checks. Global and buffer enable/disable commands retire projected views as
 appropriate. Missing parsers leave a source-only preview; oversized documents show

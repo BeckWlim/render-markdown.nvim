@@ -369,8 +369,9 @@ preview.toggle()
 assert(
     vim.api.nvim_get_current_win() == window
         and vim.b.markdown_preview_source == source
-        and vim.api.nvim_win_get_buf(second_window) == source,
-    'Toggling a shared Markdown file redirected focus into another pane'
+        and vim.b[vim.api.nvim_win_get_buf(second_window)].markdown_preview_source == source
+        and vim.api.nvim_win_get_buf(second_window) ~= vim.api.nvim_get_current_buf(),
+    'Toggling a shared Markdown file replaced another window projection'
 )
 preview.toggle()
 vim.api.nvim_win_close(second_window, true)
@@ -419,6 +420,7 @@ local external_path = vim.fn.tempname() .. '.md'
 local saved_autoread = vim.o.autoread
 vim.o.autoread = true
 vim.fn.writefile({ '# Before reload', '', 'Original prose' }, external_path)
+assert(vim.uv.fs_utime(external_path, 1, 1), 'Could not set distinct fixture timestamps')
 vim.api.nvim_cmd({ cmd = 'edit', args = { external_path } }, {})
 local external_source = vim.api.nvim_get_current_buf()
 local external_preview = preview.open(external_source)

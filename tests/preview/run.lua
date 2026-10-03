@@ -14,6 +14,7 @@ for _, path in ipairs({
     'tests/preview/preview.lua',
     'tests/preview/editing.lua',
     'tests/preview/api.lua',
+    'tests/preview/windows.lua',
 }) do
     dofile(path)
 end

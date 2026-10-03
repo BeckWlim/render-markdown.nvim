@@ -275,6 +275,15 @@ local function stop_request(request)
     end
 end
 
+local function get_state(buffer, view)
+    local views = states_by_buffer[buffer]
+    return views and views[view or 0]
+end
+
+local function registered_state(state)
+    return get_state(state.buffer, state.view) == state
+end
+
 local function retire_state(state, keep_layout)
     state.generation = state.generation + 1
     for _, request in pairs(state.jobs) do
@@ -287,13 +296,18 @@ local function retire_state(state, keep_layout)
     state.queue = {}
     state.resume_scheduled = false
     if not keep_layout and vim.api.nvim_buf_is_valid(state.buffer) then
-        vim.api.nvim_buf_clear_namespace(state.buffer, element_namespace, 0, -1)
+        for _, block in ipairs(state.blocks) do
+            if block.anchor then
+                pcall(vim.api.nvim_buf_del_extmark, state.buffer, element_namespace, block.anchor)
+            end
+        end
     end
 end
 
-local function new_state(buffer, changedtick, width, generation, settings)
+local function new_state(buffer, changedtick, width, generation, settings, view)
     return {
         buffer = buffer,
+        view = view or 0,
         active = 0,
         arrow_position = M.arrow_position == 'middle' and 'middle' or 'end',
         blocks = {},
@@ -311,7 +325,7 @@ local function new_state(buffer, changedtick, width, generation, settings)
     }
 end
 
-local function state_for(buffer, width)
+local function state_for(buffer, width, view)
     local changedtick = vim.api.nvim_buf_get_changedtick(buffer)
     local arrow_position = M.arrow_position == 'middle' and 'middle' or 'end'
     local settings = {
@@ -323,7 +337,7 @@ local function state_for(buffer, width)
         M.timeout_ms,
         M.max_blocks,
     }
-    local current_state = states_by_buffer[buffer]
+    local current_state = get_state(buffer, view)
     if
         current_state
         and current_state.width == width
@@ -347,8 +361,9 @@ local function state_for(buffer, width)
         current_state.settings = settings
         return current_state
     end
-    local next_state = new_state(buffer, changedtick, width, 1, settings)
-    states_by_buffer[buffer] = next_state
+    local next_state = new_state(buffer, changedtick, width, 1, settings, view)
+    if not states_by_buffer[buffer] then states_by_buffer[buffer] = {} end
+    states_by_buffer[buffer][next_state.view] = next_state
     return next_state
 end
 
@@ -517,7 +532,7 @@ local launch_request
 
 local function finish_request(buffer, state, request, completed_process)
     if
-        states_by_buffer[buffer] ~= state
+        not registered_state(state)
         or state.generation ~= request.generation
         or not vim.api.nvim_buf_is_valid(buffer)
         or state.jobs[request.block.key] ~= request
@@ -631,7 +646,7 @@ launch_request = function(buffer, state, request)
                 pcall(finish_request, buffer, state, request, completed_process)
             if
                 not handled
-                and states_by_buffer[buffer] == state
+                and registered_state(state)
                 and state.jobs[request.block.key] == request
             then
                 finish_request(buffer, state, request, { code = 1 })
@@ -677,7 +692,7 @@ pump = function(buffer, state)
     local started = 0
     refill_queue(state)
     while
-        states_by_buffer[buffer] == state
+        registered_state(state)
         and state.active < M.max_concurrent
         and #state.queue > 0
         and started < M.max_blocks
@@ -700,7 +715,7 @@ pump = function(buffer, state)
         vim.defer_fn(function()
             state.resume_scheduled = false
             if
-                states_by_buffer[buffer] == state
+                registered_state(state)
                 and state.generation == generation
                 and pump(buffer, state)
             then
@@ -802,7 +817,7 @@ function M.parse(context)
     local width = context.width
             and math.max(1, math.floor(context.width * M.width_ratio))
         or content_width(context.buf)
-    local state = state_for(context.buf, width)
+    local state = state_for(context.buf, width, context.view)
     reconcile_blocks(context.buf, state, context.root)
     state.requires_layout = context.defer_render ~= nil
     if context.defer_render then
@@ -810,7 +825,7 @@ function M.parse(context)
         local changedtick = state.changedtick
         context.defer_render(function()
             if
-                states_by_buffer[context.buf] == state
+                registered_state(state)
                 and vim.api.nvim_buf_is_valid(context.buf)
                 and state.generation == generation
                 and vim.api.nvim_buf_get_changedtick(context.buf)
@@ -828,8 +843,13 @@ function M.parse(context)
     return {}
 end
 
-function M.stage(buffer)
-    local state = states_by_buffer[buffer]
+function M.stage(buffer, view)
+    local views = states_by_buffer[buffer]
+    local state = get_state(buffer, view)
+    if not state and not view and views then
+        local _, first = next(views)
+        state = first
+    end
     if not state then
         return {}
     end
@@ -964,7 +984,7 @@ end
 
 function M.project(context)
     M.parse(context)
-    return M.stage(context.buf)
+    return M.stage(context.buf, context.view)
 end
 
 -- Return provider-owned geometry and deferred work. Layout never starts jobs.
@@ -972,7 +992,7 @@ function M.layout(context)
     -- Termaid is optional. Missing executables leave fences untouched and do
     -- not create loading placeholders or notifications.
     if not M.find_executable() then
-        M.detach(context.buf)
+        M.detach(context.buf, context.view)
         return {}, {}
     end
     local tasks = {}
@@ -982,13 +1002,18 @@ function M.layout(context)
         end,
     })
     M.parse(layout_context)
-    return M.stage(context.buf), tasks
+    return M.stage(context.buf, context.view), tasks
 end
 
-function M.detach(buffer)
-    local state = states_by_buffer[buffer]
-    if state then
-        retire_state(state)
+function M.detach(buffer, view)
+    local views = states_by_buffer[buffer]
+    if not views then return end
+    if view then
+        local state = views[view]
+        if state then retire_state(state); views[view] = nil end
+        if next(views) == nil then states_by_buffer[buffer] = nil end
+    else
+        for _, state in pairs(views) do retire_state(state) end
         states_by_buffer[buffer] = nil
     end
 end
