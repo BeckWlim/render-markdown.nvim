@@ -102,7 +102,7 @@ function M.validate()
             completions = settings.completions.schema(),
             overrides = settings.overrides.schema(),
             custom_handlers = settings.handlers.schema(),
-            preview = require('render-markdown.preview.config').schema(),
+            preview = settings.preview.schema(),
         })
     )
 end

@@ -1,5 +1,5 @@
 -- Focused projection, fallback, and process-budget tests for Mermaid.
-local markdown_features = require('render-markdown.preview.features')
+local projection = require('render-markdown.preview.projection')
 local mermaid = require('render-markdown.preview.mermaid')
 local log = require('render-markdown.core.log')
 local log_state = require('render-markdown.state')
@@ -82,14 +82,14 @@ local original = {
     find_executable = mermaid.find_executable,
     guicursor = vim.o.guicursor,
     max_concurrent = mermaid.max_concurrent,
-    feature_request_render = markdown_features.request_render,
+    feature_request_render = projection.request_render,
     start_process = mermaid.start_process,
     timeout = mermaid.timeout_ms,
     width_ratio = mermaid.width_ratio,
 }
 
 local refreshes = 0
-markdown_features.request_render = function(buffer, event)
+projection.request_render = function(buffer, event)
     assert(
         vim.api.nvim_buf_is_valid(buffer),
         'Mermaid requested an invalid buffer'
@@ -323,7 +323,7 @@ for index, content in ipairs({ '┌─►', '│ A │', '└───┘' }) do
     )
 end
 assert(
-    markdown_features.chunks_width(blocks[1].rows[1].chunks)
+    projection.chunks_width(blocks[1].rows[1].chunks)
         == expected_diagram_width,
     'Mermaid title did not share the filled rectangle'
 )
@@ -389,7 +389,7 @@ assert(#mermaid.stage(buffer) == 1, 'Mermaid plain fallback was not rendered')
 local fallback_rows = mermaid.stage(buffer)[1].rows
 for index = 2, #fallback_rows do
     assert(
-        markdown_features.chunks_width(fallback_rows[index].chunks) == 14,
+        projection.chunks_width(fallback_rows[index].chunks) == 14,
         'Mermaid blank or wide-character row did not fill the rectangle in display cells'
     )
 end
@@ -642,7 +642,7 @@ assert(
     #many_reserved == 18 and #process_requests == 0,
     'The provider omitted later diagrams or started jobs before frame commit'
 )
-markdown_features.dispatch(many_tasks, function()
+projection.dispatch(many_tasks, function()
     return true
 end)
 assert(
@@ -692,7 +692,7 @@ limited_context.width = 100
 process_requests = {}
 local _, limited_tasks = mermaid.layout(limited_context)
 local refreshes_before_limits = refreshes
-markdown_features.dispatch(limited_tasks, function()
+projection.dispatch(limited_tasks, function()
     return true
 end)
 assert(
@@ -753,7 +753,7 @@ assert(
     'Provider layout started rendering before returning a measured reservation'
 )
 local frame_committed = false
-markdown_features.dispatch(layout_tasks, function()
+projection.dispatch(layout_tasks, function()
     return frame_committed
 end)
 frame_committed = true
@@ -891,7 +891,7 @@ assert(
     'A large diagram replacement did not retain its last completed dimensions'
 )
 vim.api.nvim_buf_set_lines(incremental_buffer, 5, 6, false, { 'A --> Newer' })
-markdown_features.dispatch(resize_tasks, function()
+projection.dispatch(resize_tasks, function()
     return true
 end)
 vim.wait(20)
@@ -911,7 +911,7 @@ local function layout_incremental()
     })
 end
 local _, newer_tasks = layout_incremental()
-markdown_features.dispatch(newer_tasks, function()
+projection.dispatch(newer_tasks, function()
     return true
 end)
 assert(
@@ -928,7 +928,7 @@ assert(
     'A stale completion launched replacement work before the next layout commit'
 )
 local _, newest_tasks = layout_incremental()
-markdown_features.dispatch(newest_tasks, function()
+projection.dispatch(newest_tasks, function()
     return true
 end)
 assert(
@@ -944,7 +944,7 @@ assert(
     #unavailable_layout == 0 and #unavailable_tasks == 0,
     'An unavailable optional renderer reserved rows or queued work'
 )
-markdown_features.dispatch(unavailable_tasks, function()
+projection.dispatch(unavailable_tasks, function()
     return true
 end)
 assert(
@@ -963,7 +963,7 @@ log_state.log_level = original_log_level
 log.entries = original_log_entries
 mermaid.width_ratio = original.width_ratio
 mermaid.arrow_position = original.arrow_position
-markdown_features.request_render = original.feature_request_render
+projection.request_render = original.feature_request_render
 vim.o.guicursor = original.guicursor
 vim.api.nvim_set_current_buf(original.buffer)
 

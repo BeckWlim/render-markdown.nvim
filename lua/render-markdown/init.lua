@@ -119,7 +119,7 @@ M.default = {
     overrides = settings.overrides.default,
     custom_handlers = settings.handlers.default,
     -- Source-mapped, same-window preview. Disable to use ordinary inline rendering.
-    preview = require('render-markdown.preview.config').default,
+    preview = settings.preview.default,
     yaml = settings.yaml.default,
 }
 

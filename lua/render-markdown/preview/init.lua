@@ -1,13 +1,13 @@
 local M = { max_source_bytes = 1024 * 1024, max_source_lines = 10000 }
-local features = require('render-markdown.preview.features')
-local markdown = require('render-markdown.preview.providers')
+-- Session owns preview entry, navigation/editing, refresh, writes, and teardown.
+local projection = require('render-markdown.preview.projection')
 local namespace = vim.api.nvim_create_namespace('markdown_preview')
 local cursor_namespace =
     vim.api.nvim_create_namespace('markdown_preview_cursor')
 -- Source buffers share edits; every window owns its projection and cursor.
 local sessions = {}
 local sessions_by_preview = {}
-local options = vim.deepcopy(require('render-markdown.preview.config').default)
+local options = vim.deepcopy(require('render-markdown.settings').preview.default)
 
 local function enabled(source)
     local state = require('render-markdown.state')
@@ -97,7 +97,29 @@ end
 local function source_position(session)
     local cursor = vim.api.nvim_win_get_cursor(session.window)
     local row = session.rows[cursor[1]]
-    return row and features.source_position(row, cursor[2]) or { 1, 0 }
+    return row and projection.source_position(row, cursor[2]) or { 1, 0 }
+end
+
+local function navigation_position(session)
+    local origin = session.navigation
+    if origin and origin.changedtick == vim.api.nvim_buf_get_changedtick(session.source)
+        and vim.deep_equal(origin.display, vim.api.nvim_win_get_cursor(session.window)) then
+        return origin.source
+    end
+    session.navigation = nil
+end
+
+local function remember_navigation(session, position)
+    session.navigation = {
+        source = vim.deepcopy(position),
+        display = vim.api.nvim_win_get_cursor(session.window),
+        changedtick = vim.api.nvim_buf_get_changedtick(session.source),
+    }
+end
+
+local function projected_position(session, position)
+    local visible = require('render-markdown.preview.interaction').visible_position(session.source, position)
+    return projection.preview_position(session.rows, visible[1] - 1, visible[2])
 end
 
 local function remember_source_position(session)
@@ -109,7 +131,7 @@ local function remember_source_position(session)
         return
     end
     local position =
-        clamp_source_position(session.source, source_position(session))
+        clamp_source_position(session.source, navigation_position(session) or source_position(session))
     session.anchor = vim.api.nvim_buf_set_extmark(
         session.source,
         namespace,
@@ -189,6 +211,7 @@ local function concealed_spans(buffer, row, line)
 end
 
 local function move_horizontal(session, key, direction)
+    session.navigation = nil
     local count = vim.v.count1
     local cursor = vim.api.nvim_win_get_cursor(session.window)
     local line = vim.api.nvim_buf_get_lines(
@@ -231,6 +254,75 @@ local function move_horizontal(session, key, direction)
             args = { tostring(steps) .. vim.keycode(key) },
             bang = true,
         }, {})
+    end
+end
+
+local function move_word(session, key)
+    session.navigation = nil
+    local mode = vim.api.nvim_get_mode().mode
+    local conceal_mode = mode == 'n' and 'n' or 'v'
+    if vim.wo[session.window].conceallevel ~= 3
+        or not vim.wo[session.window].concealcursor:find(conceal_mode, 1, true) then
+        vim.api.nvim_cmd({ cmd = 'normal', args = { tostring(vim.v.count1) .. key }, bang = true }, {})
+        return
+    end
+    local backward = key == 'b' or key == 'B' or key == 'ge' or key == 'gE'
+    local spans_by_row = {}
+    for _ = 1, vim.v.count1 do
+        local origin = vim.api.nvim_win_get_cursor(session.window)
+        local previous = origin
+        while true do
+            -- Let Neovim own word definitions, iskeyword, punctuation and
+            -- cross-line motion. Only skip endpoints that are concealed.
+            vim.api.nvim_cmd({ cmd = 'normal', args = { key }, bang = true }, {})
+            local cursor = vim.api.nvim_win_get_cursor(session.window)
+            local line = vim.api.nvim_buf_get_lines(session.buffer, cursor[1] - 1, cursor[1], false)[1] or ''
+            if not spans_by_row[cursor[1]] then
+                spans_by_row[cursor[1]] = concealed_spans(session.buffer, cursor[1] - 1, line)
+            end
+            local character = vim.fn.charidx(line, cursor[2])
+            local hidden
+            for _, span in ipairs(spans_by_row[cursor[1]]) do
+                if character >= span[1] and character < span[2] then hidden = span; break end
+            end
+            if not hidden then break end
+            -- A WORD includes the hidden Markdown delimiters. Its visible
+            -- start/end can still belong to this same native word; replaying
+            -- another W/B/E would otherwise skip the entire link label.
+            local visible_edge
+            if key == 'W' or key == 'B' then
+                local first_column = vim.fn.byteidx(line, hidden[1])
+                local delimiter = line:sub(first_column + 1, first_column + 1)
+                if character == hidden[1] and delimiter:find('[%[%`%*_%~!]') then
+                    visible_edge = hidden[2]
+                end
+            elseif key == 'E' or key == 'gE' then
+                visible_edge = hidden[1] - 1
+            end
+            if visible_edge and visible_edge >= 0 then
+                local column = vim.fn.byteidx(line, visible_edge)
+                local visible = column >= 0 and column < #line
+                for _, span in ipairs(spans_by_row[cursor[1]]) do
+                    if visible_edge >= span[1] and visible_edge < span[2] then visible = false end
+                end
+                local progresses = backward
+                    and (cursor[1] < origin[1] or (cursor[1] == origin[1] and column < origin[2]))
+                    or not backward
+                    and (cursor[1] > origin[1] or (cursor[1] == origin[1] and column > origin[2]))
+                if visible and progresses then
+                    vim.api.nvim_win_set_cursor(session.window, { cursor[1], column })
+                    break
+                end
+            end
+            if vim.deep_equal(cursor, previous) then
+                vim.api.nvim_win_set_cursor(session.window, origin)
+                break
+            end
+            local edge = backward and hidden[1] or hidden[2] - 1
+            local column = math.max(0, vim.fn.byteidx(line, edge))
+            vim.api.nvim_win_set_cursor(session.window, { cursor[1], column })
+            previous = vim.api.nvim_win_get_cursor(session.window)
+        end
     end
 end
 
@@ -285,20 +377,23 @@ local function close(session, buffer_wiping)
     if not registered(session) then
         return
     end
+    if session.interaction then
+        session.interaction.retiring = true
+        if session.interaction.cancel then session.interaction.cancel() end
+    end
     local returning_to_source = live(session)
         and not buffer_wiping
         and not session.source_gone
     local position = live(session)
-            and clamp_source_position(session.source, source_position(session))
+            and clamp_source_position(session.source, navigation_position(session) or source_position(session))
         or nil
     local windows = sessions[session.source]
     windows[session.window] = nil
     local last_view = next(windows) == nil
-    markdown.detach(session.source, session.buffer)
+    projection.detach(session.source, session.buffer)
     if last_view then
         sessions[session.source] = nil
-        features.forget_buffer(session.source)
-        markdown.detach(session.source)
+        projection.detach(session.source)
     end
     sessions_by_preview[session.buffer] = nil
     pcall(vim.api.nvim_del_augroup_by_id, session.group)
@@ -384,7 +479,7 @@ local function project(session)
         return source_rows(session.source)
     end
     local window_info = vim.fn.getwininfo(session.window)[1] or { textoff = 0 }
-    return markdown.project({
+    return projection.project({
         buf = session.source,
         view = session.buffer,
         root = tree:root(),
@@ -400,6 +495,11 @@ local function refresh_session(session)
     if not live(session) then
         return
     end
+    if session.interaction then
+        session.refresh_after_interaction = true
+        return
+    end
+    navigation_position(session)
     local anchor_position = session.anchor
             and vim.api.nvim_buf_get_extmark_by_id(
                 session.source,
@@ -414,12 +514,13 @@ local function refresh_session(session)
     local view = vim.api.nvim_win_call(session.window, vim.fn.winsaveview)
     local projected_rows, render_tasks = project(session)
     local function dispatch()
-        features.dispatch(render_tasks, function()
+        projection.dispatch(render_tasks, function()
             return registered(session)
         end)
     end
     session.changedtick = vim.api.nvim_buf_get_changedtick(session.source)
-    local ranges = features.changed_ranges(session.rows, projected_rows)
+    session.generation = (session.generation or 0) + 1
+    local ranges = projection.changed_ranges(session.rows, projected_rows)
     if #session.rows == 0 and #ranges > 0 then
         ranges[1].old_count = vim.api.nvim_buf_line_count(session.buffer)
     end
@@ -490,15 +591,12 @@ local function refresh_session(session)
             end
         end
     end
-    local target = features.preview_position(
-        projected_rows,
-        previous_position[1] - 1,
-        previous_position[2]
-    )
+    local target = projected_position(session, previous_position)
     vim.api.nvim_win_call(session.window, function()
         vim.fn.winrestview(view)
     end)
     vim.api.nvim_win_set_cursor(session.window, target)
+    if session.navigation then remember_navigation(session, previous_position) end
     remember_source_position(session)
     highlight_cursor(session)
     dispatch()
@@ -520,6 +618,11 @@ local function schedule_refresh(session)
             session.pending = false
             return
         end
+        if session.interaction then
+            session.pending = false
+            session.refresh_after_interaction = true
+            return
+        end
         -- A selection belongs to the displayed frame. Do not move its endpoints
         -- when a provider finishes or the window is resized.
         if vim.api.nvim_get_mode().mode ~= 'n' then
@@ -539,6 +642,7 @@ end
 
 local function schedule_preview(source, window)
     vim.schedule(function()
+        local owner = sessions[source] and sessions[source][window]
         if
             vim.v.exiting == vim.NIL
             and vim.api.nvim_buf_is_valid(source)
@@ -548,6 +652,7 @@ local function schedule_preview(source, window)
             and vim.api.nvim_get_mode().mode == 'n'
             and enabled(source)
             and not vim.b[source].markdown_preview_disabled
+            and not (owner and owner.interaction)
         then
             M.open(source)
         end
@@ -561,6 +666,25 @@ local function visual_selection(session)
     end
     local anchor = vim.fn.getpos('v')
     local cursor = vim.fn.getcurpos()
+    local semantic = session.selection
+    if semantic and semantic.changedtick == session.changedtick
+        and semantic.selection == vim.o.selection and mode == 'v' then
+        local anchor_position = { anchor[2], anchor[3] - 1 }
+        local cursor_position = { cursor[2], cursor[3] - 1 }
+        local forward = vim.deep_equal(anchor_position, semantic.display_anchor)
+            and vim.deep_equal(cursor_position, semantic.display_cursor)
+        local backward = vim.deep_equal(anchor_position, semantic.display_cursor)
+            and vim.deep_equal(cursor_position, semantic.display_anchor)
+        if forward or backward then
+            return {
+                mode = mode,
+                anchor = forward and semantic.source_anchor or semantic.source_cursor,
+                cursor = forward and semantic.source_cursor or semantic.source_anchor,
+                anchor_offset = 0, cursor_offset = 0, curswant = cursor[5],
+            }
+        end
+    end
+    session.selection = nil
     local first_row = math.min(anchor[2], cursor[2])
     local last_row = math.max(anchor[2], cursor[2])
     if mode == '\22' then
@@ -578,11 +702,11 @@ local function visual_selection(session)
         mode = mode,
         anchor = clamp_source_position(
             session.source,
-            features.source_position(session.rows[anchor[2]], anchor[3] - 1)
+            projection.source_position(session.rows[anchor[2]], anchor[3] - 1)
         ),
         cursor = clamp_source_position(
             session.source,
-            features.source_position(session.rows[cursor[2]], cursor[3] - 1)
+            projection.source_position(session.rows[cursor[2]], cursor[3] - 1)
         ),
         anchor_offset = anchor[4],
         cursor_offset = cursor[4],
@@ -613,7 +737,8 @@ local function edit_source(session, keys)
         M.refresh(session.source)
     end
     local position =
-        clamp_source_position(session.source, source_position(session))
+        clamp_source_position(session.source, navigation_position(session) or source_position(session))
+    session.resume_interaction = true
     -- Suppress automatic preview entry while restoring the source. Native keys
     -- then own counts, registers, motions, repeat, and the source undo history.
     vim.b[session.source].markdown_preview_disabled = true
@@ -654,6 +779,34 @@ local function edit_source(session, keys)
     schedule_preview(session.source, session.window)
 end
 
+local function setup_navigation(buffer)
+    local interaction = require('render-markdown.preview.interaction')
+    -- Search stays native in the displayed buffer, including generated rows.
+    for _, key in ipairs({ 'g;', 'g,', '<C-]>', 'g<C-]>', 'g]', '<C-t>', 'gf', 'gF', 'm', "'", '`' }) do
+        vim.keymap.set('n', key, function()
+            interaction.dispatch({
+                target = 'source',
+                run = function(context)
+                    local suffix = ''
+                    if key == 'm' or key == "'" or key == '`' then
+                        local ok, character = pcall(vim.fn.getcharstr)
+                        if not ok or character == vim.keycode('<Esc>') or character == vim.keycode('<C-c>') then
+                            return
+                        end
+                        suffix = character
+                    end
+                    local count = context.count > 0 and tostring(context.count) or ''
+                    vim.api.nvim_cmd({
+                        cmd = 'normal',
+                        args = { '"' .. context.register .. count .. vim.keycode(key) .. suffix },
+                        bang = true,
+                    }, {})
+                end,
+            })
+        end, { buffer = buffer, silent = true, desc = 'Navigate the original Markdown file' })
+    end
+end
+
 function M.open(source)
     local window = vim.api.nvim_get_current_win()
     local windows = sessions[source]
@@ -662,7 +815,7 @@ function M.open(source)
     if copied and copied.window ~= window then
         local cursor = vim.api.nvim_win_get_cursor(window)
         local row = copied.rows[cursor[1]]
-        local position = row and features.source_position(row, cursor[2]) or { 1, 0 }
+        local position = row and projection.source_position(row, cursor[2]) or { 1, 0 }
         set_buffer(window, source)
         for name, value in pairs(copied.source_options) do
             vim.wo[window][name] = value
@@ -673,6 +826,7 @@ function M.open(source)
         return existing.buffer
     end
     if existing then
+        existing.resume_interaction = nil
         local source_cursor = vim.api.nvim_win_get_cursor(window)
         existing.source_view = vim.fn.winsaveview()
         for _, name in ipairs(window_option_names) do
@@ -683,12 +837,9 @@ function M.open(source)
         M.refresh(source)
         vim.api.nvim_win_set_cursor(
             window,
-            features.preview_position(
-                existing.rows,
-                source_cursor[1] - 1,
-                source_cursor[2]
-            )
+            projected_position(existing, source_cursor)
         )
+        remember_navigation(existing, source_cursor)
         remember_source_position(existing)
         highlight_cursor(existing)
         return existing.buffer
@@ -756,7 +907,7 @@ function M.open(source)
         desc = 'Save the Markdown source while keeping its rendered preview open',
     })
     preview_options(session)
-    features.subscribe(source, function()
+    projection.subscribe(source, function()
         for _, view in pairs(sessions[source] or {}) do
             schedule_refresh(view)
         end
@@ -790,6 +941,12 @@ function M.open(source)
             desc = 'Move across visible Markdown text',
         })
     end
+    for _, key in ipairs({ 'w', 'b', 'e', 'W', 'B', 'E', 'ge', 'gE' }) do
+        vim.keymap.set({ 'n', 'x' }, key, function()
+            move_word(session, key)
+        end, { buffer = buffer, silent = true, desc = 'Move through visible Markdown words' })
+    end
+    setup_navigation(buffer)
     for _, keys in ipairs({
         'i',
         'I',
@@ -803,6 +960,7 @@ function M.open(source)
         'C',
         'd',
         'D',
+        'y',
         'x',
         'X',
         'r',
@@ -819,16 +977,28 @@ function M.open(source)
         'gU',
         'g~',
     }) do
-        vim.keymap.set('n', keys, function()
-            edit_source(session, keys)
-        end, {
-            buffer = buffer,
-            silent = true,
-            desc = 'Edit Markdown source at cursor',
-        })
+        -- User actions (such as Flash on s/S) take precedence over native fallbacks.
+        if vim.tbl_isempty(vim.fn.maparg(keys, 'n', false, true)) then
+            vim.keymap.set('n', keys, function()
+                edit_source(session, keys)
+            end, {
+                buffer = buffer,
+                silent = true,
+                desc = 'Edit Markdown source at cursor',
+            })
+        end
     end
     -- Visual i/a and o/O are text objects and endpoint motions, not edits.
     -- Yanks keep their native displayed-text behavior in the projection.
+    -- A semantic selection, however, owns the original source endpoints.
+    vim.keymap.set('x', 'y', function()
+        if session.selection then
+            edit_source(session, 'y')
+        else
+            local keys = '"' .. vim.v.register .. tostring(vim.v.count1) .. 'y'
+            vim.api.nvim_cmd({ cmd = 'normal', args = { keys }, bang = true }, {})
+        end
+    end, { buffer = buffer, silent = true, desc = 'Yank displayed text or selected source syntax' })
     for _, keys in ipairs({
         'd',
         'D',
@@ -882,12 +1052,6 @@ function M.open(source)
             desc = 'Undo/redo Markdown source',
         })
     end
-    vim.keymap.set(
-        'n',
-        '<Space>mp',
-        close_preview,
-        { buffer = buffer, desc = 'Return to Markdown source' }
-    )
     vim.api.nvim_create_autocmd('BufWinLeave', {
         group = session.group,
         buffer = buffer,
@@ -952,9 +1116,15 @@ function M.open(source)
         buffer = buffer,
         callback = function()
             session.last_activity_ns = vim.uv.hrtime()
+            navigation_position(session)
             remember_source_position(session)
             highlight_cursor(session)
         end,
+    })
+    vim.api.nvim_create_autocmd('ModeChanged', {
+        group = session.group,
+        pattern = '*:n',
+        callback = function() session.selection = nil end,
     })
     vim.api.nvim_create_autocmd('WinScrolled', {
         group = session.group,
@@ -1004,12 +1174,9 @@ function M.open(source)
     pcall(vim.treesitter.start, buffer)
     vim.api.nvim_win_set_cursor(
         window,
-        features.preview_position(
-            session.rows,
-            source_cursor[1] - 1,
-            source_cursor[2]
-        )
+        projected_position(session, source_cursor)
     )
+    remember_navigation(session, source_cursor)
     remember_source_position(session)
     highlight_cursor(session)
     return buffer
@@ -1023,7 +1190,7 @@ function M.source_location(window)
         return
     end
     return session.source,
-        clamp_source_position(session.source, source_position(session))
+        clamp_source_position(session.source, navigation_position(session) or source_position(session))
 end
 
 function M.display_position(window, position)
@@ -1031,7 +1198,163 @@ function M.display_position(window, position)
     if not session or not live(session) or session.window ~= window then
         return
     end
-    return features.preview_position(session.rows, position[1] - 1, position[2])
+    return projection.preview_position(session.rows, position[1] - 1, position[2])
+end
+
+-- Session bridges for the public cooperative interaction boundary.
+function M.interaction_context(window)
+    local session = sessions_by_preview[vim.api.nvim_win_get_buf(window)]
+    if not session or session.window ~= window or not live(session) then return end
+    if session.changedtick ~= vim.api.nvim_buf_get_changedtick(session.source) then
+        if session.interaction then return end
+        M.refresh(session.source)
+    end
+    local generation = session.generation
+    local cursor = vim.api.nvim_win_get_cursor(window)
+    local position, quality = projection.to_source(session.rows, cursor)
+    local origin = navigation_position(session)
+    if origin then
+        if not vim.deep_equal(position, origin) then quality = 'anchor' end
+        position = origin
+    end
+    local visibility_cache = {}
+    local conceal_level = vim.wo[window].conceallevel
+    local conceal_cursor = vim.wo[window].concealcursor
+    local conceal_mode = vim.fn.mode() == 'n' and 'n' or 'v'
+    return {
+        window = window, source = session.source, buffer = session.buffer,
+        projected = true, position = position, position_quality = quality,
+        changedtick = session.changedtick, _rows = session.rows,
+        _valid = function()
+            return registered(session) and session.generation == generation
+        end,
+        _visible = function(point)
+            if conceal_level ~= 3 or (point[1] == cursor[1]
+                and not conceal_cursor:find(conceal_mode, 1, true)) then return true end
+            local line = vim.api.nvim_buf_get_lines(session.buffer, point[1] - 1, point[1], false)[1]
+            if not line then return false end
+            if not visibility_cache[point[1]] then
+                visibility_cache[point[1]] = concealed_spans(session.buffer, point[1] - 1, line)
+            end
+            local character = vim.fn.charidx(line, point[2])
+            for _, span in ipairs(visibility_cache[point[1]]) do
+                if character >= span[1] and character < span[2] then return false end
+            end
+            return true
+        end,
+    }
+end
+
+function M.begin_interaction(window, target, position)
+    local session = sessions_by_preview[vim.api.nvim_win_get_buf(window)]
+    if not session or session.window ~= window or not live(session) or session.interaction then return end
+    local lease = {
+        session = session, target = target,
+        view = vim.api.nvim_win_call(window, vim.fn.winsaveview),
+        position = position or source_position(session),
+        changedtick = session.changedtick,
+    }
+    session.interaction = lease
+    remember_source_position(session)
+    if target == 'source' then
+        local selection = visual_selection(session)
+        if selection == false then session.interaction = nil; return end
+        if selection then vim.cmd.normal({ vim.keycode('<Esc>'), bang = true }) end
+        restore_source(session, clamp_source_position(session.source, lease.position))
+        if selection then
+            vim.cmd.normal({ selection.mode, bang = true })
+            vim.fn.setpos('.', { 0, selection.anchor[1], selection.anchor[2] + 1, selection.anchor_offset })
+            vim.cmd.normal({ 'o', bang = true })
+            vim.fn.setpos('.', { 0, selection.cursor[1], selection.cursor[2] + 1, selection.cursor_offset })
+        end
+    end
+    return lease
+end
+
+function M.interaction_valid(lease)
+    local session = lease.session
+    return registered(session) and session.interaction == lease
+end
+
+function M.end_interaction(lease, cancelled)
+    local session = lease.session
+    if not M.interaction_valid(lease) then return end
+    session.interaction = nil
+    if lease.retiring or not vim.api.nvim_buf_is_valid(session.source) then return end
+    local changed = vim.api.nvim_buf_get_changedtick(session.source) ~= lease.changedtick
+    local deferred = session.refresh_after_interaction
+    session.refresh_after_interaction = nil
+    if not vim.api.nvim_win_is_valid(session.window) then return end
+    local buffer = vim.api.nvim_win_get_buf(session.window)
+    if cancelled and not lease.keep_cursor and (buffer == session.source or buffer == session.buffer)
+        and vim.api.nvim_get_mode().mode ~= 'n' then
+        vim.api.nvim_win_call(session.window, function()
+            vim.cmd.normal({ vim.keycode('<Esc>'), bang = true })
+        end)
+    end
+    if lease.target == 'source' and buffer == session.source then
+        local mode = vim.api.nvim_get_mode().mode
+        if mode ~= 'n' then
+            -- Native pending operators/Insert/Visual own the source until done.
+            session.resume_interaction = true
+            return
+        end
+        local position = cancelled and not changed and not lease.keep_cursor and lease.position
+            or vim.api.nvim_win_get_cursor(session.window)
+        set_buffer(session.window, session.buffer)
+        preview_options(session)
+        refresh_session(session)
+        vim.api.nvim_win_set_cursor(session.window,
+            projected_position(session, position))
+        if cancelled and not changed and not lease.keep_cursor then vim.fn.winrestview(lease.view) end
+        remember_navigation(session, position)
+        remember_source_position(session)
+        highlight_cursor(session)
+    elseif buffer == session.buffer then
+        if cancelled and not changed and not lease.keep_cursor then
+            vim.api.nvim_win_call(session.window, function() vim.fn.winrestview(lease.view) end)
+            remember_source_position(session)
+            highlight_cursor(session)
+        end
+        if changed or deferred then
+            if vim.api.nvim_get_mode().mode == 'n' then
+                refresh_session(session)
+            else
+                schedule_refresh(session)
+            end
+        end
+    end
+end
+
+function M.select_source(window, range)
+    local session = sessions_by_preview[vim.api.nvim_win_get_buf(window)]
+    if not session or not live(session) or session.window ~= window
+        or session.changedtick ~= vim.api.nvim_buf_get_changedtick(session.source) then return false end
+    local interaction = require('render-markdown.preview.interaction')
+    local fragments = projection.display_ranges(session.rows, range)
+    if #fragments == 0 then return false end
+    local first = fragments[1].start
+    local visible_start = interaction.visible_position(session.source, range.start)
+    if not vim.deep_equal(visible_start, range.start) then
+        first = projection.to_display(session.rows, visible_start)
+    end
+    local source_cursor = interaction.selection_end(session.source, range.finish)
+    local visible_cursor = interaction.visible_position(session.source, source_cursor)
+    local display_cursor = projection.to_display(session.rows, visible_cursor)
+    vim.api.nvim_win_call(window, function()
+        if vim.fn.mode() ~= 'n' then vim.cmd.normal({ vim.keycode('<Esc>'), bang = true }) end
+        vim.api.nvim_win_set_cursor(window, first)
+        vim.cmd.normal({ 'v', bang = true })
+        vim.fn.setpos('.', { 0, display_cursor[1], display_cursor[2] + 1, 0 })
+    end)
+    session.selection = {
+        source_anchor = vim.deepcopy(range.start),
+        source_cursor = source_cursor,
+        display_anchor = { vim.fn.getpos('v')[2], vim.fn.getpos('v')[3] - 1 },
+        display_cursor = vim.api.nvim_win_get_cursor(window),
+        changedtick = session.changedtick, selection = vim.o.selection,
+    }
+    return true
 end
 
 -- Leave the generated buffer before another full-pane UI captures the file and
@@ -1088,9 +1411,9 @@ function M.setup(config)
         end
     end
     options = vim.deepcopy(
-        config or require('render-markdown.preview.config').default
+        config or require('render-markdown.settings').preview.default
     )
-    markdown.setup(options)
+    projection.setup(options)
     local group = vim.api.nvim_create_augroup(
         'markdown_default_preview',
         { clear = true }
@@ -1152,9 +1475,15 @@ function M.setup(config)
             return
         end
         vim.wo[window].conceallevel = 0
-        if vim.b[buffer].markdown_preview_disabled or not options.auto_open then
+        if vim.api.nvim_get_mode().mode ~= 'n' then
             return
         end
+        local owner = sessions[buffer] and sessions[buffer][window]
+        local resume = owner and owner.resume_interaction
+        if vim.b[buffer].markdown_preview_disabled or (not options.auto_open and not resume) then
+            return
+        end
+        if resume then owner.resume_interaction = nil end
         schedule_preview(buffer, window)
     end
     vim.api.nvim_create_autocmd({ 'FileType', 'BufWinEnter', 'WinEnter', 'TextChanged' }, {

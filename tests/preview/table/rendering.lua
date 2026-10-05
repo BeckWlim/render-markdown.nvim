@@ -17,7 +17,7 @@ assert(
     'Table projection lost its source range'
 )
 local feature_rows = blocks[1].rows
-local chunks_width = require('render-markdown.preview.features').chunks_width
+local chunks_width = require('render-markdown.preview.projection').chunks_width
 assert(
     chunks_width(feature_rows[1].chunks)
         == chunks_width(feature_rows[#feature_rows].chunks),

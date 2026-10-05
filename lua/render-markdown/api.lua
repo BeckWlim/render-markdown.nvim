@@ -69,6 +69,17 @@ function M.preview()
     require('render-markdown.preview').toggle()
 end
 
+---Canonical buffer identity for a source file or its projected display.
+---@param buf? integer
+---@return integer?
+function M.source_buffer(buf)
+    local buffer = (buf == nil or buf == 0) and vim.api.nvim_get_current_buf() or buf
+    if not vim.api.nvim_buf_is_valid(buffer) then return end
+    local projected = package.loaded['render-markdown.preview']
+    local source = projected and projected.get(buffer)
+    return source or buffer
+end
+
 ---Source buffer and position under a projected preview cursor.
 ---@param win? integer
 ---@return integer?, integer[]?
@@ -92,6 +103,47 @@ function M.display_position(win, position)
         local window = win == 0 and vim.api.nvim_get_current_win() or win
         return projected.display_position(window, position)
     end
+end
+
+---Resolve a source-aware context in ordinary or projected buffers.
+---Positions use one-based rows / zero-based bytes; ranges are half-open.
+---@param win? integer
+---@return render.md.interaction.Context?
+function M.interaction(win)
+    return require('render-markdown.preview.interaction').context(win)
+end
+
+---Cooperatively route a plugin operation to the source or displayed buffer.
+---Async operations must call token:finish() or token:cancel().
+---@param operation render.md.interaction.Operation
+---@param opts? {window?: integer}
+function M.dispatch(operation, opts)
+    return require('render-markdown.preview.interaction').dispatch(operation, opts)
+end
+
+---Create a callback for user keymaps, commands, or plugin hooks.
+---Invocation arguments follow context/token; returns match dispatch().
+---@param operation render.md.interaction.Operation
+---@param opts? {window?: integer}
+---@return function
+function M.wrap(operation, opts)
+    return require('render-markdown.preview.interaction').wrap(operation, opts)
+end
+
+---Select a source syntax node without depending on a navigation plugin.
+---Set options.preview = true to retain the selection in the projected view.
+---@param index? integer Smallest source node is 1.
+---@param opts? {window?: integer, preview?: boolean}
+function M.select_node(index, opts)
+    return require('render-markdown.preview.interaction').select_node(index, opts)
+end
+
+---Resolve an inline link from the original source under the rendered cursor.
+---@param win? integer
+---@return table?
+function M.link_at_cursor(win)
+    local context = M.interaction(win)
+    return context and context:link() or nil
 end
 
 ---Restore source before another UI takes over the window.

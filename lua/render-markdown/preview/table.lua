@@ -1,5 +1,5 @@
 local M = {}
-local markdown_features = require('render-markdown.preview.features')
+local projection = require('render-markdown.preview.projection')
 
 M.cell_margins = { left = 1, right = 2 }
 M.table_layout = {
@@ -518,7 +518,7 @@ end
 
 local function padded_chunks(chunks, width, alignment, base_highlight)
     local remaining_width =
-        math.max(width - markdown_features.chunks_width(chunks), 0)
+        math.max(width - projection.chunks_width(chunks), 0)
     local left_padding = 0
     if alignment == 'right' then
         left_padding = remaining_width
@@ -576,7 +576,7 @@ local function render_table(parsed_table, width)
     }
     local title_padding = parsed_table.start_column
         + total_width
-        - markdown_features.chunks_width(title_chunks)
+        - projection.chunks_width(title_chunks)
     if title_padding > 0 then
         title_chunks[#title_chunks + 1] =
             { string.rep(' ', title_padding), table_highlights.label }
@@ -618,6 +618,8 @@ local function render_table(parsed_table, width)
                         last = character_byte + #character.text,
                         source_column = row.cell_ranges[column].start_column
                             + (character.source_start or 0),
+                        source_end = row.cell_ranges[column].start_column
+                            + (character.source_end or #character.text),
                     }
                     character_byte = character_byte + #character.text
                 end
@@ -697,11 +699,11 @@ function M.project(context)
     for _, node in query:iter_captures(context.root, context.buf, 0, -1) do
         if not node:has_error() then
             local start_row, start_column = node:range()
-            local key = markdown_features.block_key(
+            local key = projection.block_key(
                 vim.treesitter.get_node_text(node, context.buf),
                 { layout, start_column }
             )
-            local block = markdown_features.cached_projection(
+            local block = projection.cached_projection(
                 objects,
                 key,
                 start_row,

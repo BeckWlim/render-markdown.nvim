@@ -1,5 +1,4 @@
-local features = require('render-markdown.preview.features')
-local markdown = require('render-markdown.preview.providers')
+local projection = require('render-markdown.preview.projection')
 local preview = require('render-markdown.preview')
 local original_buffer = vim.api.nvim_get_current_buf()
 local original_options = {
@@ -100,7 +99,7 @@ local tree = assert(
     vim.treesitter.get_parser(source, 'markdown'):parse()[1],
     'Expected preview test condition'
 )
-local rows = markdown.project({
+local rows = projection.project({
     buf = source,
     root = tree:root(),
     width = window_width - vim.fn.getwininfo(window)[1].textoff,
@@ -118,7 +117,7 @@ for index, row in ipairs(rows) do
 end
 assert(target_row, 'Fixture has no mapped table continuation')
 local target_column = rows[target_row].spans[1].first
-local source_target = features.source_position(rows[target_row], target_column)
+local source_target = projection.source_position(rows[target_row], target_column)
 vim.api.nvim_win_set_cursor(window, { target_row, target_column })
 vim.api.nvim_exec_autocmds('CursorMoved', { buffer = preview_buffer })
 local cursor_namespace = vim.api.nvim_get_namespaces().markdown_preview_cursor
@@ -228,7 +227,7 @@ assert(
     edited_position and edited_position[1] == source_target[1],
     'Automatic preview lost the edited source row'
 )
-vim.api.nvim_feedkeys(vim.keycode('<Space>mp'), 'xt', false)
+require('render-markdown').preview()
 vim.api.nvim_feedkeys(vim.keycode('iRAW<Esc>'), 'xt', false)
 vim.wait(50)
 assert(
@@ -332,7 +331,7 @@ assert(
         and vim.api.nvim_get_current_buf() == source,
     'Leaving rendered view closed the editor pane'
 )
-features.request_render(source, 'late result')
+projection.request_render(source, 'late result')
 vim.wait(50)
 assert(
     vim.api.nvim_get_current_buf() == source,

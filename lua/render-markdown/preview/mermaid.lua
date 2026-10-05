@@ -11,7 +11,7 @@ local M = {
     width_ratio = 0.85,
     arrow_position = 'end',
 }
-local markdown_features = require('render-markdown.preview.features')
+local projection = require('render-markdown.preview.projection')
 local log = require('render-markdown.core.log')
 
 local states_by_buffer = {}
@@ -99,7 +99,7 @@ local function block_from_node(buffer, node, width)
     local content_start = content_node:range()
     local content_end = line_end_exclusive(content_node)
     local block_end = line_end_exclusive(node)
-    local key = markdown_features.block_key(source, { width })
+    local key = projection.block_key(source, { width })
     return {
         block_end = block_end,
         block_start = block_start,
@@ -411,7 +411,7 @@ local function reconcile_blocks(buffer, state, root)
             end
         end
     end
-    local plan = markdown_features.plan_elements(
+    local plan = projection.plan_elements(
         blocks,
         state.results,
         state.jobs,
@@ -516,7 +516,7 @@ function M.start_process(command, options, callback)
 end
 
 local function request_render(buffer)
-    markdown_features.request_render(buffer, 'MermaidRender')
+    projection.request_render(buffer, 'MermaidRender')
 end
 
 local function report_failure(buffer, block, reason)
@@ -873,7 +873,7 @@ function M.stage(buffer, view)
                 block.content_start - block.block_start,
                 block.content_end - block.content_start,
             }, ':')
-            local projected = markdown_features.cached_projection(
+            local projected = projection.cached_projection(
                 state.projections,
                 key,
                 block.block_start,
@@ -906,7 +906,7 @@ function M.stage(buffer, view)
                             estimated = false,
                         }
                     local diagram_width =
-                        markdown_features.chunks_width(rows[1].chunks)
+                        projection.chunks_width(rows[1].chunks)
                     for index = 1, layout.height - 1 do
                         local line = rendered_lines[index]
                             or (
@@ -925,7 +925,7 @@ function M.stage(buffer, view)
                             local padding = math.max(
                                 0,
                                 block.width
-                                    - markdown_features.chunks_width(chunks)
+                                    - projection.chunks_width(chunks)
                             )
                             chunks[#chunks + 1] = {
                                 string.rep(' ', padding),
@@ -934,7 +934,7 @@ function M.stage(buffer, view)
                         end
                         diagram_width = math.max(
                             diagram_width,
-                            markdown_features.chunks_width(chunks)
+                            projection.chunks_width(chunks)
                         )
                         rows[#rows + 1] = {
                             chunks = chunks,
@@ -953,7 +953,7 @@ function M.stage(buffer, view)
                     for _, row in ipairs(rows) do
                         local chunks = row.chunks
                         local padding_width = diagram_width
-                            - markdown_features.chunks_width(chunks)
+                            - projection.chunks_width(chunks)
                         if padding_width > 0 then
                             chunks[#chunks + 1] = {
                                 string.rep(' ', padding_width),

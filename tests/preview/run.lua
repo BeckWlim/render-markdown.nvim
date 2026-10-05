@@ -6,6 +6,7 @@ vim.api.nvim_buf_set_name(0, 'preview-test-origin')
 
 for _, path in ipairs({
     'tests/preview/features.lua',
+    'tests/preview/source_map.lua',
     'tests/preview/table/cells.lua',
     'tests/preview/table/rendering.lua',
     'tests/preview/mermaid.lua',
@@ -14,6 +15,10 @@ for _, path in ipairs({
     'tests/preview/preview.lua',
     'tests/preview/editing.lua',
     'tests/preview/api.lua',
+    'tests/preview/interaction.lua',
+    'tests/preview/configuration.lua',
+    'tests/preview/link_motion.lua',
+    'tests/preview/native.lua',
     'tests/preview/windows.lua',
 }) do
     dofile(path)

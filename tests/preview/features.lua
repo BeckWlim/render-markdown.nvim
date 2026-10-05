@@ -1,4 +1,4 @@
-local features = require('render-markdown.preview.features')
+local projection = require('render-markdown.preview.projection')
 local buffer = vim.api.nvim_create_buf(false, true)
 vim.api.nvim_buf_set_lines(
     buffer,
@@ -7,7 +7,7 @@ vim.api.nvim_buf_set_lines(
     false,
     { 'before', 'table source', 'mermaid source', 'after' }
 )
-local rows = features.project({
+local rows = projection.compose({
     {
         project = function()
             return {
@@ -56,15 +56,15 @@ assert(
     'Shared projection lost surrounding prose'
 )
 assert(
-    vim.deep_equal(features.source_position(rows[3], 2), { 2, 6 }),
+    vim.deep_equal(projection.source_position(rows[3], 2), { 2, 6 }),
     'Wrapped row lost its source byte mapping'
 )
 assert(
-    vim.deep_equal(features.source_position(rows[5], 2), { 4, 2 }),
+    vim.deep_equal(projection.source_position(rows[5], 2), { 4, 2 }),
     'Prose source mapping changed its column'
 )
 assert(
-    vim.deep_equal(features.preview_position(rows, 1, 6), { 3, 0 }),
+    vim.deep_equal(projection.preview_position(rows, 1, 6), { 3, 0 }),
     'Source navigation did not select the matching continuation'
 )
 local cached_objects = {}
@@ -73,13 +73,13 @@ local function build_object()
     builds = builds + 1
     return { start_row = 1, end_row = 2, rows = { rows[2], rows[3] } }
 end
-local object_key = features.block_key('object', { 80 })
+local object_key = projection.block_key('object', { 80 })
 local original_object = assert(
-    features.cached_projection(cached_objects, object_key, 1, build_object),
+    projection.cached_projection(cached_objects, object_key, 1, build_object),
     'Expected preview test condition'
 )
 local moved_object = assert(
-    features.cached_projection(cached_objects, object_key, 3, build_object),
+    projection.cached_projection(cached_objects, object_key, 3, build_object),
     'Expected preview test condition'
 )
 assert(
@@ -96,20 +96,20 @@ assert(
     'Moving an unchanged object copied its rendered content'
 )
 assert(
-    #features.changed_ranges(original_object.rows, moved_object.rows) == 0,
+    #projection.changed_ranges(original_object.rows, moved_object.rows) == 0,
     'Source-only mapping changes invalidated the rendered buffer'
 )
 local changed_rows = vim.deepcopy(rows)
 changed_rows[1].chunks = { { 'new before' } }
 changed_rows[5].chunks = { { 'new after' } }
-local changed_ranges = features.changed_ranges(rows, changed_rows)
+local changed_ranges = projection.changed_ranges(rows, changed_rows)
 assert(
     #changed_ranges == 2
         and changed_ranges[1].old_count == 1
         and changed_ranges[2].old_count == 1,
     'Separate prose edits included unchanged objects in the buffer patch'
 )
-local element_plan = features.plan_elements({
+local element_plan = projection.plan_elements({
     { key = 'completed', start_row = 10 },
     { key = 'running' },
     { key = 'new' },
@@ -125,19 +125,27 @@ assert(
     'Element plan rerendered cached/running objects, retained removed objects, or exceeded its budget'
 )
 local refreshes = 0
-features.subscribe(buffer, function()
+projection.subscribe(buffer, function()
     refreshes = refreshes + 1
 end)
-features.request_render(buffer, 'table')
-features.request_render(buffer, 'mermaid')
+projection.request_render(buffer, 'table')
+projection.request_render(buffer, 'mermaid')
 assert(
     vim.wait(100, function()
         return refreshes == 1
     end),
     'Feature refreshes were not coalesced'
 )
-features.request_render(buffer)
-features.forget_buffer(buffer)
+projection.request_render(buffer)
+projection.detach(buffer, buffer)
+assert(
+    vim.wait(100, function()
+        return refreshes == 2
+    end),
+    'Closing one projection cancelled the shared source subscription'
+)
+projection.request_render(buffer)
+projection.detach(buffer)
 vim.wait(10)
-assert(refreshes == 1, 'Closed preview accepted a stale refresh')
+assert(refreshes == 2, 'Closed preview accepted a stale refresh')
 vim.api.nvim_buf_delete(buffer, { force = true })
