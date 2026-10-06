@@ -297,12 +297,14 @@ vim.api.nvim_buf_set_lines(
 vim.api.nvim_exec_autocmds('TextChanged', { buffer = source })
 for _ = 1, 4 do
     vim.api.nvim_exec_autocmds('CursorMoved', { buffer = reopened })
-    vim.wait(50)
-    assert(
-        vim.api.nvim_buf_get_lines(reopened, 0, 1, false)[1]
-            ~= 'inserted above preview selection',
-        'A background refresh interrupted ongoing preview navigation'
-    )
+    local delivered = false
+    vim.schedule(function() delivered = true end)
+    assert(vim.wait(500, function() return delivered end, 1),
+        'Navigation did not deliver its queued main-loop messages')
+    local cursor = vim.api.nvim_win_get_cursor(window)
+    assert(vim.api.nvim_buf_get_lines(reopened, cursor[1] - 1, cursor[1], false)[1]
+        == 'changed prose after table',
+        'A refresh moved ongoing navigation away from its source text')
 end
 assert(
     vim.wait(200, function()
@@ -459,6 +461,7 @@ vim.fn.writefile(
     { '# Conflicting external change', '', 'Disk content' },
     external_path
 )
+assert(vim.uv.fs_utime(external_path, 2, 2), 'Could not set conflict fixture timestamp')
 local conflict_reason
 local conflict_handler = vim.api.nvim_create_autocmd('FileChangedShell', {
     buffer = external_source,

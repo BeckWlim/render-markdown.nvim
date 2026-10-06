@@ -6,9 +6,11 @@ local replacements = require('render-markdown.lib.replacements')
 ---@field private buf integer
 ---@field private timer uv.uv_timer_t
 ---@field private running boolean
+---@field private pending? fun()
 ---@field private marks render.md.Extmark[]
 ---@field private generated render.md.Extmark[]
 ---@field private tick integer?
+---@field private invalidated boolean
 ---@field n integer
 local Decorator = {}
 Decorator.__index = Decorator
@@ -20,9 +22,11 @@ function Decorator.new(buf)
     self.buf = buf
     self.timer = assert(compat.uv.new_timer())
     self.running = false
+    self.pending = nil
     self.marks = {}
     self.generated = {}
     self.tick = nil
+    self.invalidated = false
     self.n = 0
     return self
 end
@@ -34,7 +38,7 @@ end
 
 ---@return boolean
 function Decorator:changed()
-    return self.tick ~= self:get_tick()
+    return self.invalidated or self.tick ~= self:get_tick()
 end
 
 ---@return render.md.Extmark[]
@@ -49,6 +53,7 @@ end
 function Decorator:set(marks)
     self.marks = marks
     self.tick = self:get_tick()
+    self.invalidated = false
     self.n = self.n + 1
 end
 
@@ -58,6 +63,16 @@ function Decorator:clear(ns)
         extmark:hide(ns, self.buf)
     end
     self.generated = {}
+end
+
+-- A projection transaction can replace lines and parse regions without an
+-- editor TextChanged event. Retire all old coordinates and extmark IDs before
+-- that transaction; the next render builds decorations for its committed frame.
+---@param ns integer
+function Decorator:invalidate(ns)
+    self:clear(ns)
+    self.marks = {}
+    self.invalidated = true
 end
 
 ---@param ns integer
@@ -100,8 +115,17 @@ function Decorator:schedule(debounce, ms, callback)
     if debounce and ms > 0 then
         self.timer:start(ms, 0, function()
             self.running = false
+            local pending = self.pending
+            self.pending = nil
+            if pending then
+                vim.schedule(pending)
+            end
         end)
-        if not self.running then
+        if self.running then
+            -- Keep the newest request: the viewport or buffer may have changed
+            -- since the leading update, even if no further event follows.
+            self.pending = callback
+        else
             self.running = true
             vim.schedule(callback)
         end

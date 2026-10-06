@@ -353,6 +353,11 @@ local function parse_prose(buffer, rows)
     parser:parse(true)
 end
 
+local function start_prose_highlighter(buffer)
+    require('render-markdown.core.ts').prepare('markdown')
+    vim.treesitter.start(buffer)
+end
+
 local function restore_source(session, position)
     set_buffer(session.window, session.source)
     for name, value in pairs(session.source_options) do
@@ -377,6 +382,9 @@ local function close(session, buffer_wiping)
     if not registered(session) then
         return
     end
+    session.refresh_request = nil
+    session.refresh_requested = nil
+    session.decoration_request = nil
     if session.interaction then
         session.interaction.retiring = true
         if session.interaction.cancel then session.interaction.cancel() end
@@ -491,14 +499,37 @@ local function project(session)
     })
 end
 
+-- Projection text and ordinary Markdown decorations belong to one frame.
+-- Rebuild through the existing renderer after the caller restores its cursor,
+-- without depending on a later editor event to notice programmatic line edits.
+local function schedule_decorations(session)
+    local request = {}
+    local generation = session.generation
+    session.decoration_request = request
+    vim.schedule(function()
+        if session.decoration_request ~= request then
+            return
+        end
+        session.decoration_request = nil
+        if live(session) and session.generation == generation
+            and vim.bo[session.buffer].filetype == 'markdown' then
+            require('render-markdown.core.ui').update(
+                session.buffer, session.window, 'PreviewCommit', true
+            )
+        end
+    end)
+end
+
 local function refresh_session(session)
     if not live(session) then
         return
     end
-    if session.interaction then
-        session.refresh_after_interaction = true
+    if session.interaction or vim.api.nvim_get_mode().mode ~= 'n' then
+        session.refresh_requested = true
         return
     end
+    session.refresh_requested = nil
+    session.refresh_request = nil
     navigation_position(session)
     local anchor_position = session.anchor
             and vim.api.nvim_buf_get_extmark_by_id(
@@ -527,11 +558,13 @@ local function refresh_session(session)
     session.rows = projected_rows
     if #ranges == 0 then
         sync_modified(session)
+        schedule_decorations(session)
         dispatch()
         return
     end
     -- A buffer replacement can synchronously redraw. Retire the old highlight
     -- iterators before changing lines whose Markdown parse regions are moving.
+    require('render-markdown.core.ui').invalidate(session.buffer)
     local highlighted = vim.treesitter.highlighter.active[session.buffer] ~= nil
     if highlighted then
         vim.treesitter.stop(session.buffer)
@@ -567,7 +600,7 @@ local function refresh_session(session)
     sync_modified(session)
     parse_prose(session.buffer, projected_rows)
     if highlighted then
-        vim.treesitter.start(session.buffer)
+        start_prose_highlighter(session.buffer)
     end
     for _, range in ipairs(ranges) do
         for index = range.new_start + 1, range.new_start + range.new_count do
@@ -599,6 +632,7 @@ local function refresh_session(session)
     if session.navigation then remember_navigation(session, previous_position) end
     remember_source_position(session)
     highlight_cursor(session)
+    schedule_decorations(session)
     dispatch()
 end
 
@@ -609,35 +643,32 @@ function M.refresh(source)
 end
 
 local function schedule_refresh(session)
-    if session.pending then
+    if not registered(session) then
         return
     end
-    session.pending = true
-    local function apply_when_idle()
-        if not live(session) then
-            session.pending = false
+    -- Messages describe dirty state, not a snapshot. Coalesce them for the
+    -- next main-loop turn; mode/interaction/entry events resume blocked work.
+    session.refresh_requested = true
+    if session.refresh_request then
+        return
+    end
+    local request = {}
+    session.refresh_request = request
+    vim.schedule(function()
+        if session.refresh_request ~= request then
             return
         end
-        if session.interaction then
-            session.pending = false
-            session.refresh_after_interaction = true
+        session.refresh_request = nil
+        if not live(session) or session.interaction then
             return
         end
         -- A selection belongs to the displayed frame. Do not move its endpoints
         -- when a provider finishes or the window is resized.
         if vim.api.nvim_get_mode().mode ~= 'n' then
-            vim.defer_fn(apply_when_idle, 80)
             return
         end
-        local quiet_ms = (vim.uv.hrtime() - session.last_activity_ns) / 1e6
-        if quiet_ms < 120 then
-            vim.defer_fn(apply_when_idle, math.ceil(120 - quiet_ms))
-            return
-        end
-        session.pending = false
         refresh_session(session)
-    end
-    vim.defer_fn(apply_when_idle, 80)
+    end)
 end
 
 local function schedule_preview(source, window)
@@ -871,7 +902,6 @@ function M.open(source)
         window = window,
         rows = {},
         feature_cache = {},
-        last_activity_ns = vim.uv.hrtime(),
         source_options = source_options,
         source_view = source_view,
         source_bufhidden = source_bufhidden,
@@ -903,6 +933,7 @@ function M.open(source)
                 vim.cmd(command)
             end)
             sync_modified(session)
+            schedule_decorations(session)
         end,
         desc = 'Save the Markdown source while keeping its rendered preview open',
     })
@@ -1115,7 +1146,6 @@ function M.open(source)
         group = session.group,
         buffer = buffer,
         callback = function()
-            session.last_activity_ns = vim.uv.hrtime()
             navigation_position(session)
             remember_source_position(session)
             highlight_cursor(session)
@@ -1124,13 +1154,11 @@ function M.open(source)
     vim.api.nvim_create_autocmd('ModeChanged', {
         group = session.group,
         pattern = '*:n',
-        callback = function() session.selection = nil end,
-    })
-    vim.api.nvim_create_autocmd('WinScrolled', {
-        group = session.group,
-        pattern = tostring(window),
         callback = function()
-            session.last_activity_ns = vim.uv.hrtime()
+            session.selection = nil
+            if session.refresh_requested then
+                schedule_refresh(session)
+            end
         end,
     })
     vim.api.nvim_create_autocmd('WinResized', {
@@ -1171,7 +1199,7 @@ function M.open(source)
     })
     M.refresh(source)
     vim.bo[buffer].filetype = 'markdown'
-    pcall(vim.treesitter.start, buffer)
+    pcall(start_prose_highlighter, buffer)
     vim.api.nvim_win_set_cursor(
         window,
         projected_position(session, source_cursor)
@@ -1282,8 +1310,7 @@ function M.end_interaction(lease, cancelled)
     session.interaction = nil
     if lease.retiring or not vim.api.nvim_buf_is_valid(session.source) then return end
     local changed = vim.api.nvim_buf_get_changedtick(session.source) ~= lease.changedtick
-    local deferred = session.refresh_after_interaction
-    session.refresh_after_interaction = nil
+    local deferred = session.refresh_requested
     if not vim.api.nvim_win_is_valid(session.window) then return end
     local buffer = vim.api.nvim_win_get_buf(session.window)
     if cancelled and not lease.keep_cursor and (buffer == session.source or buffer == session.buffer)

@@ -61,6 +61,16 @@ configuration, and custom-handler dispatch. Projected buffers participate in the
 existing source lookup and `overrides.preview` configuration path. Table decorations
 are disabled only in projected buffers that already contain generated tables.
 
+Each frame commit invalidates ordinary Markdown decorations before replacing
+text and parse regions, then requests their rebuild through the existing renderer
+after cursor restoration. The deferred request belongs to the current session and
+generation; superseded or retired views cannot publish it. Saves also request a
+rebuild, so language labels do not depend on a later cursor or text-change event.
+Before every preview highlighter start, the renderer reapplies configured query
+adjustments to the current Markdown query. Lazy-loading another plugin can replace
+that query through a runtime-path change; native code-fence line concealment must
+remain disabled so it cannot hide the renderer's language decorations.
+
 ## Editing and lifecycle
 
 Every generated row is a real buffer line, so native cursor movement, Visual selection, scrolling, and yanking operate on displayed text. `q` and `<C-q>` return to source; Enter retains native next-line movement.
@@ -82,7 +92,11 @@ Native splits create independent projections; closing or replacing a pane preser
 
 Explicit source selection or window closure retires only that view.
 Source deletion retires all its views; source subscriptions remain active until the last view closes.
-Refreshes wait for navigation to be idle and preserve unchanged object rows.
+Source changes, provider completions, and resize events post coalesced refresh
+messages to the main loop. Insert/Visual modes, active interactions, and hidden
+views retain the dirty request; Normal-mode, interaction-completion, and preview-entry
+events resume it. No idle timer controls view lifetime or refresh readiness.
+Frame commits preserve cursor/source anchors and unchanged object rows.
 Hidden source buffers receive native file change checks. Global and buffer enable/disable commands retire projected views as appropriate.
 
 Missing parsers leave a source-only preview; oversized documents show a size-limit message without changing the source.

@@ -21,13 +21,13 @@ end
 
 ---called from state on attach
 function M.init()
+    for _, language in ipairs(state.file_types) do
+        M.prepare(language)
+    end
     if M.initialized then
         return
     end
     M.initialized = true
-    for _, language in ipairs(state.file_types) do
-        M.disable(language)
-    end
     if state.restart_highlighter then
         vim.treesitter.stop()
         vim.treesitter.start()
@@ -69,9 +69,11 @@ function M.inject(language)
     pcall(vim.treesitter.query.set, language, 'injections', query)
 end
 
----@private
+-- Runtime-path changes can replace the cached highlight query after initial
+-- attachment (for example, when Flash loads on its first shortcut). Adjust
+-- the current query before a highlighter takes ownership of it.
 ---@param language string
-function M.disable(language)
+function M.prepare(language)
     local pattern = state.patterns[language]
     if not pattern or not pattern.disable then
         return

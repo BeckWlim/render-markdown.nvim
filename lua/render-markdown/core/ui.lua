@@ -35,6 +35,15 @@ function M.get(buf)
 end
 
 ---@param buf integer
+function M.invalidate(buf)
+    local decorator = M.cache[buf]
+    if decorator then
+        decorator:invalidate(M.ns)
+        vim.api.nvim_buf_clear_namespace(buf, M.ns, 0, -1)
+    end
+end
+
+---@param buf integer
 ---@param win integer
 ---@param event string
 ---@param force boolean
