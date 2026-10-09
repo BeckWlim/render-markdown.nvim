@@ -3,7 +3,7 @@ local preview = require('render-markdown.preview')
 local original = vim.api.nvim_get_current_buf()
 local window = vim.api.nvim_get_current_win()
 local selection = vim.o.selection
-renderer.setup({ preview = { auto_open = false, mermaid = { enabled = false } } })
+renderer.setup({ preview = { condition = function() return true end, auto_open = false, mermaid = { enabled = false } } })
 local source = vim.api.nvim_create_buf(true, false)
 vim.api.nvim_set_current_buf(source)
 vim.api.nvim_buf_set_lines(source, 0, -1, false, {

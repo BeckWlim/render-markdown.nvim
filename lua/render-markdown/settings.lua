@@ -1752,6 +1752,7 @@ M.preview = {}
 ---@class (exact) render.md.preview.Config
 ---@field enabled boolean
 ---@field auto_open boolean
+---@field condition fun(source: integer, window: integer): boolean
 ---@field mermaid render.md.preview.mermaid.Config
 
 ---@class (exact) render.md.preview.mermaid.Config
@@ -1763,6 +1764,10 @@ M.preview = {}
 M.preview.default = {
     enabled = true,
     auto_open = true,
+    -- A host can supply a context policy; individual views opt in by window.
+    condition = function(_, window)
+        return vim.w[window].render_markdown_preview == true
+    end,
     mermaid = {
         enabled = true,
         command = 'termaid',
@@ -1776,6 +1781,7 @@ function M.preview.schema()
         record = {
             enabled = { type = 'boolean' },
             auto_open = { type = 'boolean' },
+            condition = { type = 'function' },
             mermaid = {
                 record = {
                     enabled = { type = 'boolean' },

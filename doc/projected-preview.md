@@ -3,19 +3,50 @@
 This preview was migrated from BeckNvim into the renderer. It requires
 Neovim 0.12 or newer and the Markdown Tree-sitter parsers. The fork retains the setup,
 command, and custom-handler interfaces on a best-effort
-basis. The source-mapped preview is the default; the legacy side-by-side preview
-has been removed. Set `preview.enabled = false` for ordinary inline rendering.
+basis. Source-mapped preview is an optional capability of each viewing context;
+the legacy side-by-side preview has been removed. `preview.enabled = false`
+disables the capability globally.
 
 ```lua
 require('render-markdown').setup({})
+-- The owner of this window explicitly permits projection.
+vim.w.render_markdown_preview = true
 ```
 
-Markdown files then open rendered in their current window. `:RenderMarkdown preview`
+Approved Markdown windows then open rendered on the next entry event. `:RenderMarkdown preview`
 and `require('render-markdown').preview()` switch between rendered text and source.
 Set `preview.auto_open = false` for manual entry. Mermaid activates automatically when an
 executable is available; installation is optional. For lazy.nvim, a host can use
 `dependencies = { { 'BeckWlim/termaid', optional = true } }` and declare Termaid
 separately to opt in. No Python package is installed by this renderer.
+
+## Context permission
+
+The default `preview.condition(source, window)` accepts only windows with
+`w:render_markdown_preview = true`. The source is the original buffer, even when
+the window currently shows generated text. Hosts may supply a different callback;
+only a literal `true` grants permission. Keep the callback synchronous and free of
+side effects. Do not grant permission solely because a buffer has Markdown filetype.
+
+Automatic entry, `:RenderMarkdown preview`, the public `preview()` command, and
+internal entry all check the same permission. Scheduled entry checks it again before
+replacing a buffer. To opt in immediately, set the window variable and call
+`require('render-markdown').preview()`. `auto_open = false` still allows manual entry
+in approved contexts. Native diff windows and `diffview://` documents remain blocked
+as a defensive invariant, even when the callback grants permission.
+
+Permissions belong to the destination window, so two windows displaying one source
+can use different modes. Owners should set their permission before exposing a view
+and clear it when returning the window to a different owner. To revoke an active
+view immediately, set its permission to false and call
+`require('render-markdown').leave_preview()` in that window; entry events also
+reconcile permissions. Revocation restores source text and retires
+only that window's session. A native split copying a projection into an unapproved
+window restores the copied source without closing the original preview.
+
+Unapproved contexts retain the normal inline renderer and their source buffer.
+Projection still requires an ordinary Markdown source buffer (`buftype = ''`);
+approval does not bypass the source/write contract for scratch buffers.
 
 Configure diagrams through `preview.mermaid`: `enabled = false` disables them,
 `command` selects an executable, and `arrow_position = 'middle'` changes arrowhead

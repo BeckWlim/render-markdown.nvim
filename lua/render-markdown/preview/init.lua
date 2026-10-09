@@ -9,6 +9,11 @@ local sessions = {}
 local sessions_by_preview = {}
 local options = vim.deepcopy(require('render-markdown.settings').preview.default)
 
+local function diff_source(source, window)
+    return vim.wo[window].diff
+        or vim.api.nvim_buf_get_name(source):match('^diffview://') ~= nil
+end
+
 local function enabled(source)
     local state = require('render-markdown.state')
     return options.enabled
@@ -16,6 +21,21 @@ local function enabled(source)
         and state.get(source).enabled
         and not state.ignore(source)
 end
+-- One permission boundary for automatic entry, commands, and direct callers.
+-- Evaluate against the source and destination window, never the generated buffer.
+---@param source integer
+---@param window integer
+---@return boolean
+function M.allowed(source, window)
+    return vim.api.nvim_buf_is_valid(source)
+        and vim.api.nvim_win_is_valid(window)
+        and vim.bo[source].filetype == 'markdown'
+        and vim.bo[source].buftype == ''
+        and not diff_source(source, window)
+        and options.enabled
+        and options.condition(source, window) == true
+end
+
 local window_option_names = {
     'number',
     'relativenumber',
@@ -682,6 +702,7 @@ local function schedule_preview(source, window)
             and vim.api.nvim_win_get_buf(window) == source
             and vim.api.nvim_get_mode().mode == 'n'
             and enabled(source)
+            and M.allowed(source, window)
             and not vim.b[source].markdown_preview_disabled
             and not (owner and owner.interaction)
         then
@@ -840,6 +861,10 @@ end
 
 function M.open(source)
     local window = vim.api.nvim_get_current_win()
+    -- A projection changes line coordinates and replaces the buffer, which
+    -- clears native diff/scroll binding. Keep both diff panes on source text.
+    -- Index buffers need the URI check before Diffview installs window options.
+    local permitted = M.allowed(source, window) and enabled(source)
     local windows = sessions[source]
     local existing = windows and windows[window]
     local copied = sessions_by_preview[vim.api.nvim_win_get_buf(window)]
@@ -852,6 +877,9 @@ function M.open(source)
             vim.wo[window][name] = value
         end
         vim.api.nvim_win_set_cursor(window, clamp_source_position(source, position))
+    end
+    if not permitted then
+        return
     end
     if existing and live(existing) then
         return existing.buffer
@@ -1406,7 +1434,7 @@ end
 function M.sync_enabled()
     local retired = {}
     for _, session in ipairs(all_sessions()) do
-        if not enabled(session.source) then
+        if not M.allowed(session.source, session.window) or not enabled(session.source) then
             retired[#retired + 1] = session
         end
     end
@@ -1481,8 +1509,20 @@ function M.setup(config)
     local function render_when_normal(event)
         local buffer = event.buf
         local window = vim.api.nvim_get_current_win()
+        if vim.api.nvim_win_get_buf(window) ~= buffer then return end
         local copied = sessions_by_preview[buffer]
         if copied then
+            if not M.allowed(copied.source, window) or not enabled(copied.source) then
+                if copied.window == window then
+                    close(copied)
+                    vim.b[copied.source].markdown_preview_disabled = false
+                else
+                    -- Native splits can copy a projection into an unapproved view.
+                    -- Restore only this destination; preserve the owner's session.
+                    M.open(copied.source)
+                end
+                return
+            end
             if copied.window ~= window then
                 vim.schedule(function()
                     if registered(copied) and vim.api.nvim_win_is_valid(window)
@@ -1494,10 +1534,9 @@ function M.setup(config)
             return
         end
         if
-            vim.bo[buffer].filetype ~= 'markdown'
-            or vim.bo[buffer].buftype ~= ''
+            not M.allowed(buffer, window)
+            or not enabled(buffer)
             or vim.b[buffer].markdown_preview_source
-            or vim.api.nvim_win_get_buf(window) ~= buffer
         then
             return
         end
@@ -1516,7 +1555,7 @@ function M.setup(config)
     vim.api.nvim_create_autocmd({ 'FileType', 'BufWinEnter', 'WinEnter', 'TextChanged' }, {
         group = group,
         callback = render_when_normal,
-        desc = 'Show Markdown files rendered by default in their current pane',
+        desc = 'Show Markdown preview in explicitly approved contexts',
     })
     vim.api.nvim_create_autocmd('ModeChanged', {
         group = group,

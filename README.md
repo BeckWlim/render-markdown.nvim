@@ -18,8 +18,9 @@ Improve viewing Markdown in Neovim
 
 This fork provides a [source-mapped preview](doc/projected-preview.md) with
 wrapped table rows, source editing and saving, and automatic Mermaid rendering
-when the optional Termaid executable is available. The preview is enabled by
-default; use `preview.enabled = false` for ordinary inline rendering. The legacy
+when the optional Termaid executable is available. Each window must opt in with
+`vim.w[window].render_markdown_preview = true`, or the host must supply an explicit
+`preview.condition(source, window)` policy. Other contexts keep ordinary inline rendering. The legacy
 side-by-side preview has been replaced, while setup and command interfaces remain
 compatible on a best-effort basis.
 
@@ -53,7 +54,7 @@ compatible on a best-effort basis.
 
 # Requirements
 
-- Neovim `>= 0.12.0` for the default preview pipeline
+- Neovim `>= 0.12.0` for the optional preview pipeline
 - Nerd font symbols: [more details](https://github.com/MeanderingProgrammer/render-markdown.nvim/wiki/Fonts)
 - [treesitter](https://github.com/nvim-treesitter/nvim-treesitter) parsers:
   - [markdown & markdown_inline](https://github.com/tree-sitter-grammars/tree-sitter-markdown):

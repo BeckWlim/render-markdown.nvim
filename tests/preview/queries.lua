@@ -8,7 +8,7 @@ for index, path in ipairs({ directory, directory .. '/second', directory .. '/th
     vim.fn.writefile({ '; extends', '; query replacement fixture ' .. index },
         path .. '/queries/markdown/highlights.scm')
 end
-renderer.setup({ preview = { auto_open = false, mermaid = { enabled = false } } })
+renderer.setup({ preview = { condition = function() return true end, auto_open = false, mermaid = { enabled = false } } })
 local source = vim.api.nvim_create_buf(true, false)
 vim.api.nvim_set_current_buf(source)
 vim.api.nvim_buf_set_lines(source, 0, -1, false, {
@@ -54,7 +54,7 @@ assert(concealed_lines(attached) == 0,
 
 -- Preserve an explicit opt-out from the configured query adjustments.
 renderer.setup({ patterns = { markdown = { disable = false } },
-    preview = { auto_open = false, mermaid = { enabled = false } } })
+    preview = { condition = function() return true end, auto_open = false, mermaid = { enabled = false } } })
 vim.o.runtimepath = runtimepath
 vim.opt.runtimepath:append(directory .. '/third')
 display = preview.open(source)
@@ -65,4 +65,4 @@ vim.api.nvim_set_current_buf(original)
 vim.api.nvim_buf_delete(source, { force = true })
 vim.o.runtimepath = runtimepath
 vim.fn.delete(directory, 'rf')
-renderer.setup({ preview = { auto_open = false, mermaid = { enabled = false } } })
+renderer.setup({ preview = { condition = function() return true end, auto_open = false, mermaid = { enabled = false } } })

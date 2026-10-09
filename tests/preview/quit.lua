@@ -6,7 +6,7 @@ for _, scenario in ipairs({ 'clean', 'dirty', 'force', 'hidden' }) do
     local setup = ([=[
 vim.opt.runtimepath:prepend(vim.fn.getcwd())
 vim.o.hidden = true
-require('render-markdown').setup({ preview = { enabled = true } })
+require('render-markdown').setup({ preview = { condition = function() return true end, enabled = true } })
 vim.cmd.edit(%q)
 local source = vim.api.nvim_get_current_buf()
 vim.bo.filetype = 'markdown'

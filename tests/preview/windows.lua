@@ -16,7 +16,7 @@ rawset(mermaid, 'start_process', function(command, _, callback)
     end
     return { kill = function() request.killed = true end }
 end)
-renderer.setup({ preview = { enabled = true, mermaid = { enabled = true } } })
+renderer.setup({ preview = { condition = function() return true end, enabled = true, mermaid = { enabled = true } } })
 vim.cmd.tabnew()
 local first = vim.api.nvim_get_current_win()
 local source = vim.api.nvim_get_current_buf()

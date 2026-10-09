@@ -4,7 +4,7 @@ local ui = require('render-markdown.core.ui')
 local original = vim.api.nvim_get_current_buf()
 renderer.setup({
     debounce = 100,
-    preview = { auto_open = false, mermaid = { enabled = false } },
+    preview = { condition = function() return true end, auto_open = false, mermaid = { enabled = false } },
 })
 local source = vim.api.nvim_create_buf(true, false)
 local filename = vim.fn.tempname() .. '.md'
@@ -101,7 +101,7 @@ vim.fn.delete(filename)
 local frame_initializations = 0
 renderer.setup({
     debounce = 100,
-    preview = { auto_open = false, mermaid = { enabled = false } },
+    preview = { condition = function() return true end, auto_open = false, mermaid = { enabled = false } },
     on = { initial = function() frame_initializations = frame_initializations + 1 end },
 })
 local frame_source = vim.api.nvim_create_buf(true, false)

@@ -7,7 +7,7 @@ vim.fn.mkdir(directory, 'p')
 local filename = directory .. '/source.md'
 local target = directory .. '/target.lua'
 vim.fn.writefile({ 'return true' }, target)
-renderer.setup({ preview = { mermaid = { enabled = false } } })
+renderer.setup({ preview = { condition = function() return true end, mermaid = { enabled = false } } })
 local source = vim.api.nvim_create_buf(true, false)
 vim.api.nvim_set_current_buf(source)
 vim.api.nvim_buf_set_name(source, filename)

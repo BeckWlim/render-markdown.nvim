@@ -5,6 +5,7 @@ vim.o.hidden = true
 vim.api.nvim_buf_set_name(0, 'preview-test-origin')
 
 for _, path in ipairs({
+    'tests/preview/contexts.lua',
     'tests/preview/features.lua',
     'tests/preview/source_map.lua',
     'tests/preview/table/cells.lua',
@@ -23,6 +24,7 @@ for _, path in ipairs({
     'tests/preview/link_motion.lua',
     'tests/preview/native.lua',
     'tests/preview/windows.lua',
+    'tests/preview/diff.lua',
 }) do
     dofile(path)
 end

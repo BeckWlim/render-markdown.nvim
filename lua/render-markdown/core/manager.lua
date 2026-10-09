@@ -76,9 +76,8 @@ function M.set_buf(buf, enable)
     local projected = package.loaded['render-markdown.preview']
     local source = projected and projected.get(buffer) or buffer
     if
-        state.preview.enabled
-        and env.buf.get(source, 'buftype') == ''
-        and env.buf.get(source, 'filetype') == 'markdown'
+        projected
+        and (projected.get(buffer) or projected.allowed(source, vim.api.nvim_get_current_win()))
     then
         local source_config = state.get(source)
         source_config.enabled = enable == nil and not source_config.enabled
@@ -183,11 +182,7 @@ function M.should_attach(buf)
         return false
     end
 
-    if
-        state.preview.enabled
-        and file_type == 'markdown'
-        and env.buf.get(buf, 'buftype') == ''
-    then
+    if require('render-markdown.preview').allowed(buf, vim.api.nvim_get_current_win()) then
         log.attach(buf, 'skip', 'projected preview source')
         return false
     end

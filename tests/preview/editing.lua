@@ -4,7 +4,7 @@ local window = vim.api.nvim_get_current_win()
 local fixture =
     { 'alpha BRAVO charlie', 'delta ECHO foxtrot', 'golf HOTEL india' }
 
-require('render-markdown').setup({ preview = { mermaid = { enabled = false } } })
+require('render-markdown').setup({ preview = { condition = function() return true end, mermaid = { enabled = false } } })
 
 local function input(keys)
     vim.api.nvim_feedkeys(vim.keycode(keys), 'xt', false)

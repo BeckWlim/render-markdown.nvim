@@ -118,7 +118,7 @@ M.default = {
     win_options = settings.win_options.default,
     overrides = settings.overrides.default,
     custom_handlers = settings.handlers.default,
-    -- Source-mapped, same-window preview. Disable to use ordinary inline rendering.
+    -- Source-mapped preview requires explicit permission from preview.condition.
     preview = settings.preview.default,
     yaml = settings.yaml.default,
 }

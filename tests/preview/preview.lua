@@ -31,7 +31,7 @@ vim.wo[window].relativenumber = true
 vim.wo[window].winbar = 'source window'
 vim.wo[window].colorcolumn = '80,160'
 local source_tick = vim.api.nvim_buf_get_changedtick(source)
-require('render-markdown').setup({ preview = { enabled = true } })
+require('render-markdown').setup({ preview = { condition = function() return true end, enabled = true } })
 vim.bo[source].filetype = 'markdown'
 assert(
     vim.wait(200, function()
@@ -424,6 +424,7 @@ vim.fn.writefile({ '# Before reload', '', 'Original prose' }, external_path)
 assert(vim.uv.fs_utime(external_path, 1, 1), 'Could not set distinct fixture timestamps')
 vim.api.nvim_cmd({ cmd = 'edit', args = { external_path } }, {})
 local external_source = vim.api.nvim_get_current_buf()
+vim.bo[external_source].filetype = 'markdown'
 local external_preview = preview.open(external_source)
 vim.fn.writefile(
     { '# After external reload', '', 'Updated prose from disk' },

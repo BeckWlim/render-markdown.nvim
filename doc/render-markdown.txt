@@ -74,7 +74,7 @@ Improve viewing Markdown in Neovim
 ==============================================================================
 3. Requirements                                 *render-markdown-requirements*
 
-- Neovim `>= 0.12.0` for the default preview pipeline
+- Neovim `>= 0.12.0` for the optional preview pipeline
 - Nerd font symbols: more details <https://github.com/MeanderingProgrammer/render-markdown.nvim/wiki/Fonts>
 - treesitter <https://github.com/nvim-treesitter/nvim-treesitter> parsers:
     - markdown & markdown_inline <https://github.com/tree-sitter-grammars/tree-sitter-markdown>:
@@ -1986,8 +1986,9 @@ vim:tw=78:ts=8:noet:ft=help:norl:
 ==============================================================================
 FORK PREVIEW PIPELINE                               *render-markdown-projection*
 
-The source-mapped preview is the default in this fork. Markdown opens rendered in
-its existing window. :RenderMarkdown preview toggles source and rendered text.
+Source-mapped preview requires explicit permission for each viewing context.
+Approved Markdown windows render in place. :RenderMarkdown preview toggles source
+and rendered text only in approved windows.
 q and CTRL-Q return to source; normal edit keys map back to source and return to
 preview after editing. Writes and undo/redo affect the source buffer.
 
@@ -1996,10 +1997,20 @@ Setup options (all other resource and layout policies remain internal): >lua
         preview = {
             enabled = true,
             auto_open = true,
+            condition = function(source, window)
+                return vim.w[window].render_markdown_preview == true
+            end,
             mermaid = { enabled = true, command = 'termaid', arrow_position = 'end' },
         },
     })
 <
+Set w:render_markdown_preview to true in a window owned by your integration to
+opt in. Hosts may replace preview.condition with their own context policy; it
+must return true explicitly. Permission is checked again before queued entry.
+Native diff windows remain blocked. Other contexts keep ordinary inline rendering.
+Revoke permission before handing a window back; leave_preview() restores an active
+preview immediately, and entry events also reconcile permissions.
+
 Termaid is optional and activates when available. Missing executables leave
 Mermaid fences as source. No Python package is installed by the renderer.
 

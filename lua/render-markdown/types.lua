@@ -323,6 +323,7 @@
 ---@class (exact) render.md.preview.UserConfig
 ---@field enabled? boolean
 ---@field auto_open? boolean
+---@field condition? fun(source: integer, window: integer): boolean
 ---@field mermaid? render.md.preview.mermaid.UserConfig
 
 ---@class (exact) render.md.preview.mermaid.UserConfig

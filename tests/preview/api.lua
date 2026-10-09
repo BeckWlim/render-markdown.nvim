@@ -2,7 +2,7 @@ local manager = require('render-markdown.core.manager')
 local renderer = require('render-markdown')
 local state = require('render-markdown.state')
 local original_buffer = vim.api.nvim_get_current_buf()
-renderer.setup({ preview = { enabled = false } })
+renderer.setup({ preview = { condition = function() return true end, enabled = false } })
 require('render-markdown.core.colors').init()
 manager.init()
 assert(
@@ -33,7 +33,7 @@ assert(
 )
 local custom_calls = 0
 renderer.setup({
-    preview = {
+    preview = { condition = function() return true end,
         enabled = true,
         auto_open = false,
         mermaid = { command = '/missing/optional-termaid' },
@@ -126,14 +126,14 @@ assert(
     vim.api.nvim_get_current_buf() == source,
     'Public leave_preview did not restore source'
 )
-renderer.setup({ preview = { enabled = true } })
+renderer.setup({ preview = { condition = function() return true end, enabled = true } })
 assert(
     vim.wait(200, function()
         return vim.api.nvim_get_current_buf() ~= source
     end, 5),
     'Lazy setup did not open the current Markdown source'
 )
-renderer.setup({ preview = { enabled = false } })
+renderer.setup({ preview = { condition = function() return true end, enabled = false } })
 assert(
     vim.api.nvim_get_current_buf() == source,
     'Disabling projection through setup leaked its preview'

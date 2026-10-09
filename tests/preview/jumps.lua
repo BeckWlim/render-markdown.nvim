@@ -14,7 +14,7 @@ local document = {
 vim.fn.writefile({ 'First file', 'Second line' }, directory .. '/before.txt')
 vim.fn.writefile(document, directory .. '/document.md')
 vim.fn.writefile({ 'Last file' }, directory .. '/after.txt')
-require('render-markdown').setup({ preview = { enabled = true } })
+require('render-markdown').setup({ preview = { condition = function() return true end, enabled = true } })
 vim.api.nvim_cmd({ cmd = 'edit', args = { directory .. '/before.txt' } }, {})
 local before = vim.api.nvim_get_current_buf()
 vim.cmd('clearjumps')
